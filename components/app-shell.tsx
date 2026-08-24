@@ -9,7 +9,7 @@ import { ApproverDashboard } from "@/components/approver-dashboard"
 import { SubscriptionAlert } from "@/components/subscription-alert"
 
 const names: Record<Role, string> = {
-  employee: "김차장",
+  employee: "김대리",
   approver: "정부장",
 }
 
