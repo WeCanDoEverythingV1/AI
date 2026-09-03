@@ -1,8 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Field } from "@/components/field"
 import {
   Table,
   TableBody,
@@ -19,11 +33,19 @@ import {
   type RiskLevel,
 } from "@/lib/mock-data"
 import {
+  Calendar,
   Check,
   CheckCircle2,
   Clock,
+  DollarSign,
+  FileText,
+  Layers,
+  Plus,
   ShieldCheck,
+  Store,
+  Tag,
   TriangleAlert,
+  User,
   Wallet,
   X,
 } from "lucide-react"
@@ -31,9 +53,10 @@ import {
 type Decision = "approved" | "rejected"
 
 export function ApproverDashboard() {
+  const [requests, setRequests] = useState<ApprovalRequest[]>(pendingRequests)
   const [decisions, setDecisions] = useState<Record<string, Decision>>({})
 
-  const pending = pendingRequests.filter((r) => !decisions[r.id])
+  const pending = requests.filter((r) => !decisions[r.id])
   const pendingTotal = useMemo(
     () => pending.reduce((sum, r) => sum + r.amount, 0),
     [pending],
@@ -44,15 +67,21 @@ export function ApproverDashboard() {
   const decide = (id: string, decision: Decision) =>
     setDecisions((prev) => ({ ...prev, [id]: decision }))
 
+  const addRequest = (draft: NewRequestDraft) =>
+    setRequests((prev) => [buildRequest(draft, prev), ...prev])
+
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">
-          Pending approvals
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Review AI-drafted receipt requests from your team.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-balance">
+            Pending approvals
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Review AI-drafted receipt requests from your team.
+          </p>
+        </div>
+        <AddRequestDialog onAdd={addRequest} />
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
@@ -107,6 +136,237 @@ export function ApproverDashboard() {
         )}
       </div>
     </main>
+  )
+}
+
+type NewRequestDraft = {
+  employee: string
+  merchant: string
+  category: string
+  date: string
+  amount: string
+  item: string
+  purpose: string
+  risk: RiskLevel
+}
+
+const emptyDraft: NewRequestDraft = {
+  employee: "",
+  merchant: "",
+  category: "",
+  date: "",
+  amount: "",
+  item: "",
+  purpose: "",
+  risk: "compliant",
+}
+
+const riskPresets: { level: RiskLevel; short: string; label: string }[] = [
+  { level: "compliant", short: "Compliant", label: "Policy Compliant" },
+  { level: "warning", short: "Warning", label: "Warning: Needs review" },
+  { level: "high", short: "High risk", label: "High Risk: Manual review" },
+]
+
+const categoryOptions = ["Meals", "Travel", "Software", "Lodging", "Equipment", "Other"]
+
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return "??"
+  return parts
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join("")
+}
+
+function formatDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  const date = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date()
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+}
+
+function nextRequestId(existing: ApprovalRequest[]) {
+  const highest = existing.reduce((max, r) => {
+    const n = Number.parseInt(r.id.replace(/\D/g, ""), 10)
+    return Number.isNaN(n) ? max : Math.max(max, n)
+  }, 2041)
+  return `REQ-${highest + 1}`
+}
+
+function buildRequest(
+  draft: NewRequestDraft,
+  existing: ApprovalRequest[],
+): ApprovalRequest {
+  const preset = riskPresets.find((r) => r.level === draft.risk) ?? riskPresets[0]
+  return {
+    id: nextRequestId(existing),
+    employee: draft.employee.trim(),
+    initials: initialsOf(draft.employee),
+    merchant: draft.merchant.trim(),
+    category: draft.category.trim() || "Other",
+    date: formatDate(draft.date),
+    amount: Number.parseFloat(draft.amount.replace(/[^0-9.]/g, "")) || 0,
+    item: draft.item.trim() || draft.merchant.trim(),
+    purpose: draft.purpose.trim() || "Manually added by approver.",
+    risk: { level: preset.level, label: preset.label },
+  }
+}
+
+function AddRequestDialog({ onAdd }: { onAdd: (draft: NewRequestDraft) => void }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<NewRequestDraft>(emptyDraft)
+  const [error, setError] = useState<string | null>(null)
+
+  const update = <K extends keyof NewRequestDraft>(key: K, value: NewRequestDraft[K]) =>
+    setDraft((prev) => ({ ...prev, [key]: value }))
+
+  const openChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      setDraft(emptyDraft)
+      setError(null)
+    }
+  }
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!draft.employee.trim() || !draft.merchant.trim()) {
+      setError("Employee and merchant are required.")
+      return
+    }
+    const amount = Number.parseFloat(draft.amount.replace(/[^0-9.]/g, ""))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Enter an amount greater than 0.")
+      return
+    }
+    onAdd(draft)
+    openChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={openChange}>
+      <DialogTrigger render={<Button variant="outline" size="sm" className="gap-1" />}>
+        <Plus />
+        추가
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add a request</DialogTitle>
+          <DialogDescription>
+            Log a receipt request manually — it drops straight into the pending queue.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form id="add-request-form" onSubmit={submit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id="new-employee" label="Employee" icon={<User className="size-4" />}>
+              <Input
+                id="new-employee"
+                value={draft.employee}
+                onChange={(e) => update("employee", e.target.value)}
+                placeholder="Sarah Chen"
+              />
+            </Field>
+            <Field id="new-merchant" label="Merchant" icon={<Store className="size-4" />}>
+              <Input
+                id="new-merchant"
+                value={draft.merchant}
+                onChange={(e) => update("merchant", e.target.value)}
+                placeholder="Blue Bottle Coffee"
+              />
+            </Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field id="new-category" label="Category" icon={<Layers className="size-4" />}>
+              <Input
+                id="new-category"
+                list="new-category-options"
+                value={draft.category}
+                onChange={(e) => update("category", e.target.value)}
+                placeholder="Meals"
+              />
+              <datalist id="new-category-options">
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </Field>
+            <Field id="new-date" label="Date" icon={<Calendar className="size-4" />}>
+              <Input
+                id="new-date"
+                type="date"
+                value={draft.date}
+                onChange={(e) => update("date", e.target.value)}
+              />
+            </Field>
+            <Field id="new-amount" label="Amount" icon={<DollarSign className="size-4" />}>
+              <Input
+                id="new-amount"
+                inputMode="decimal"
+                value={draft.amount}
+                onChange={(e) => update("amount", e.target.value)}
+                placeholder="0.00"
+              />
+            </Field>
+          </div>
+
+          <Field id="new-item" label="Item name" icon={<Tag className="size-4" />}>
+            <Input
+              id="new-item"
+              value={draft.item}
+              onChange={(e) => update("item", e.target.value)}
+              placeholder="Team offsite coffee"
+            />
+          </Field>
+
+          <Field id="new-purpose" label="Purpose" icon={<FileText className="size-4" />}>
+            <Textarea
+              id="new-purpose"
+              rows={2}
+              value={draft.purpose}
+              onChange={(e) => update("purpose", e.target.value)}
+              placeholder="Client onboarding kickoff with the Acme account team."
+              className="resize-none"
+            />
+          </Field>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">AI risk analysis</Label>
+            <div className="flex flex-wrap gap-2">
+              {riskPresets.map((r) => (
+                <Button
+                  key={r.level}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => update("risk", r.level)}
+                  className={cn("gap-1.5", draft.risk === r.level && riskStyles[r.level].wrap)}
+                >
+                  {riskStyles[r.level].icon}
+                  {r.short}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </form>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <Button type="submit" form="add-request-form" className="gap-1">
+            <Plus className="size-4" />
+            Add to queue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
