@@ -430,21 +430,6 @@ export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
               >
                 {scan && (
                   <>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                      <span>AI 인식 결과</span>
-                      {scan.category && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span>원본 분류 “{scan.category}”</span>
-                        </>
-                      )}
-                      {risk && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span>{risk.label}</span>
-                        </>
-                      )}
-                    </div>
 
                     {scan.possibleDuplicate && (
                       <DuplicateBanner note={scan.duplicateNote} />

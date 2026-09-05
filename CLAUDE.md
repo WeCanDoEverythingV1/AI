@@ -12,14 +12,16 @@ The SaaS subscription inventory stays client-side (`companySubscriptions` in `li
 
 The backend has no endpoint to move a decided request back to `PENDING`, so approve/reject is one-way in the UI.
 
-### Expense policy (in progress)
+### Expense policy
 
-The goal is to replace the hardcoded `categoryLimits` in `lib/policy.ts` with rules the AI extracts from each company's own 복무규정 PDF. The design splits **interpretation** (rare, at upload) from **judgment** (every expense), so the approver table never makes a per-row AI call and verdicts do not drift between renders.
+Replaces hardcoded spend limits with rules extracted from each company's own 복무규정 PDF. The design splits **interpretation** (rare, at upload) from **judgment** (every expense), so the approver table never makes a per-row AI call and verdicts do not drift between renders. The endpoints are live on the same backend as everything else.
 
-- `types/policy.ts` is the contract the real service must implement; `lib/api/policies.ts` calls it.
-- **`app/api/policies/*` is a temporary stub** — the deployed backend does not serve these routes yet. It returns a fixed example ruleset and keeps state in memory only (lost on dev-server restart). `_engine.ts` there is the reference implementation of the deterministic evaluation the real backend should mirror. Delete the folder and set `NEXT_PUBLIC_POLICY_API_URL` once the service is live; `usingPolicyStub` in `lib/api/client.ts` drives the warning banner meanwhile.
+- `types/policy.ts` mirrors the backend's `PolicyRulesetDto` / `PolicyRuleDto` / `PolicyEvaluationInputDto`; `lib/api/policies.ts` calls them. Watch the naming — the wire shape is **not** what the field is called in the UI: `expenseCategory`, `limitAmount`, and a **flat** `clauseArticle`/`clauseText`/`clausePage` (no nested clause object). `evaluate` takes `attendeeCount` and an integer `hour`, not a `HH:mm` string. Almost every field except `expenseCategory`/`scope`/`severity`/`clauseText` can come back `null`.
 - `components/policy-console.tsx` is the 규정 관리 screen (upload → human review → activate, plus a test console). Never let extracted rules go live without the review step — one misread limit would apply company-wide.
-- **Not wired yet**: `deriveRisk` / `categoryLimits` still drive the badges on the employee and approver screens. Switching them over needs the backend to evaluate at `POST /api/approval-requests` and persist the verdict (`complianceLevel`, `citedClauses`, `rulesetVersion`) on the record.
+- Activation **archives** the previous version server-side; the console then deletes the leftovers so only the current version is listed. That cleanup is best-effort on purpose: the server refuses to delete a version an approval request still cites, and that refusal must not fail the activation.
+- `confidence` is never rendered as a score, only as a "확인 필요" flag — see `ReviewFlag` in `components/policy-rule-editor.tsx` for why.
+- **Not wired yet**: `deriveRisk` / `categoryLimits` in `lib/policy.ts` still drive the badges on the employee and approver screens. Switching them over needs the backend to evaluate at `POST /api/approval-requests` and persist the verdict (`complianceLevel`, `citedClauses`, `rulesetVersion`) on the record.
+- **Extraction is still canned**: `POST /api/policies` returns the same two-rule Korean fixture whatever PDF you upload (verified against the deployed service). Everything else — persistence, review edits, activation, evaluation including the LLM fallback — is real.
 
 The project was scaffolded/is maintained via v0.app (see `generator: 'v0.app'` in `app/layout.tsx` and the v0-sandbox entries in `.gitignore`).
 

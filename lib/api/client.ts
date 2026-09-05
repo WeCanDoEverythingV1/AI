@@ -8,20 +8,6 @@ export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+
 
 export const apiUrl = (path: string) => `${API_BASE_URL}${path}`
 
-/**
- * Base URL for the expense-policy endpoints, which the deployed backend does not
- * serve yet. Empty means same-origin, which reaches the temporary stub in
- * `app/api/policies/*`. Set `NEXT_PUBLIC_POLICY_API_URL` once the real service
- * implements them, then delete the stub.
- */
-export const POLICY_BASE_URL = (process.env.NEXT_PUBLIC_POLICY_API_URL ?? "").replace(
-  /\/+$/,
-  "",
-)
-
-/** True while the policy screens are talking to the local stub, not a real service. */
-export const usingPolicyStub = POLICY_BASE_URL === ""
-
 /** The AI endpoints call a model, so they need far more headroom than a CRUD read. */
 export const TIMEOUT = {
   read: 20_000,
@@ -61,8 +47,6 @@ type RequestOptions = {
   formData?: FormData
   timeoutMs?: number
   signal?: AbortSignal
-  /** Override the host, e.g. `POLICY_BASE_URL`. Defaults to `API_BASE_URL`. */
-  base?: string
 }
 
 /**
@@ -70,14 +54,7 @@ type RequestOptions = {
  * caller-side aborts, and normalizes failures into `ApiError`.
  */
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const {
-    method = "GET",
-    json,
-    formData,
-    timeoutMs = TIMEOUT.read,
-    signal,
-    base = API_BASE_URL,
-  } = options
+  const { method = "GET", json, formData, timeoutMs = TIMEOUT.read, signal } = options
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -90,7 +67,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   let response: Response
   try {
-    response = await fetch(`${base}${path}`, {
+    response = await fetch(apiUrl(path), {
       method,
       // No Content-Type for FormData: the browser must set the boundary.
       headers: json !== undefined ? { "Content-Type": "application/json" } : undefined,
@@ -115,7 +92,10 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   if (!response.ok) throw await toApiError(response)
 
-  if (response.status === 204) return undefined as T
+  // DELETE answers 204; tolerate an empty 200 body from any other verb too.
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return undefined as T
+  }
 
   try {
     return (await response.json()) as T

@@ -11,7 +11,10 @@ import type { ExpenseCategory } from "@/types/api"
 import type { PolicyRule, RuleScope, RuleSeverity } from "@/types/policy"
 import { Quote, Trash2, TriangleAlert } from "lucide-react"
 
-/** Anything under this needs a human to confirm the extractor read it right. */
+/**
+ * Threshold for raising the "확인 필요" flag. Used internally only — the score
+ * itself is never shown; see `ReviewFlag` for why.
+ */
 export const LOW_CONFIDENCE = 0.8
 
 const scopeLabels: Record<RuleScope, string> = {
@@ -56,7 +59,10 @@ export function PolicyRuleEditor({
   return (
     <ul className="space-y-3">
       {rules.map((rule) => {
-        const uncertain = rule.confidence < LOW_CONFIDENCE
+        // A missing confidence is not a vote of confidence — flag it for review.
+        const uncertain = (rule.confidence ?? 0) < LOW_CONFIDENCE
+        const evidence = rule.requiredEvidence ?? []
+        const prohibitions = rule.prohibitions ?? []
         return (
           <li
             key={rule.id}
@@ -66,13 +72,16 @@ export function PolicyRuleEditor({
             )}
           >
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="font-normal">
-                {rule.sourceClause.article}
-              </Badge>
+              {rule.clauseArticle && (
+                <Badge variant="secondary" className="font-normal">
+                  {rule.clauseArticle}
+                </Badge>
+              )}
               <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                {rule.note}
+                {/* The server often omits `note`; the clause itself is the fallback. */}
+                {rule.note || rule.clauseText}
               </p>
-              <ConfidenceBadge value={rule.confidence} />
+              {uncertain && <ReviewFlag />}
               {!readOnly && (
                 <Button
                   type="button"
@@ -90,7 +99,8 @@ export function PolicyRuleEditor({
             {uncertain && (
               <p className="mb-3 flex items-start gap-1.5 text-xs text-warning-foreground">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                추출 신뢰도가 낮습니다. 원문과 대조해 확인해 주세요.
+                AI가 이 조항을 정확히 읽었는지 확실하지 않습니다. 아래 원문과 대조해
+                확인해 주세요.
               </p>
             )}
 
@@ -100,9 +110,9 @@ export function PolicyRuleEditor({
                   id={`${rule.id}-category`}
                   className={selectClass}
                   disabled={readOnly}
-                  value={rule.category}
+                  value={rule.expenseCategory}
                   onChange={(e) =>
-                    update(rule.id, { category: e.target.value as ExpenseCategory })
+                    update(rule.id, { expenseCategory: e.target.value as ExpenseCategory })
                   }
                 >
                   {expenseCategories.map((c) => (
@@ -134,11 +144,11 @@ export function PolicyRuleEditor({
                   id={`${rule.id}-limit`}
                   inputMode="numeric"
                   disabled={readOnly}
-                  value={rule.limit ?? ""}
+                  value={rule.limitAmount ?? ""}
                   placeholder="한도 없음"
                   onChange={(e) => {
                     const digits = e.target.value.replace(/[^0-9]/g, "")
-                    update(rule.id, { limit: digits === "" ? null : Number(digits) })
+                    update(rule.id, { limitAmount: digits === "" ? null : Number(digits) })
                   }}
                 />
               </FieldRow>
@@ -162,14 +172,17 @@ export function PolicyRuleEditor({
               </FieldRow>
             </div>
 
-            {(rule.requiredEvidence.length > 0 || rule.prohibitions.length > 0) && (
+            {(evidence.length > 0 ||
+              prohibitions.length > 0 ||
+              rule.conditions?.latestHour != null ||
+              rule.conditions?.weekendAllowed === false) && (
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                {rule.requiredEvidence.map((e) => (
+                {evidence.map((e) => (
                   <Badge key={e} variant="outline" className="font-normal">
                     첨부 {e}
                   </Badge>
                 ))}
-                {rule.prohibitions.map((p) => (
+                {prohibitions.map((p) => (
                   <Badge
                     key={p}
                     className="border-destructive/30 bg-destructive/10 font-normal text-destructive"
@@ -177,9 +190,14 @@ export function PolicyRuleEditor({
                     금지 {p}
                   </Badge>
                 ))}
-                {rule.conditions.latestHour != null && (
+                {rule.conditions?.latestHour != null && (
                   <Badge variant="outline" className="font-normal">
                     {rule.conditions.latestHour}시 이후 제한
+                  </Badge>
+                )}
+                {rule.conditions?.weekendAllowed === false && (
+                  <Badge variant="outline" className="font-normal">
+                    주말 제한
                   </Badge>
                 )}
               </div>
@@ -188,12 +206,12 @@ export function PolicyRuleEditor({
             <figure className="mt-3 border-l-2 border-border pl-3">
               <blockquote className="flex gap-1.5 text-xs leading-relaxed text-muted-foreground">
                 <Quote className="mt-0.5 size-3 shrink-0" />
-                {rule.sourceClause.text}
+                {rule.clauseText}
               </blockquote>
               <figcaption className="mt-1 text-[11px] text-muted-foreground/70">
-                {rule.sourceClause.article}
-                {rule.sourceClause.page ? ` · ${rule.sourceClause.page}쪽` : ""}
-                {rule.limit !== null && ` · 현재 한도 ${currency(rule.limit)}`}
+                {rule.clauseArticle ?? "출처 미상"}
+                {rule.clausePage ? ` · ${rule.clausePage}쪽` : ""}
+                {rule.limitAmount != null && ` · 현재 한도 ${currency(rule.limitAmount)}`}
               </figcaption>
             </figure>
           </li>
@@ -222,20 +240,20 @@ function FieldRow({
   )
 }
 
-function ConfidenceBadge({ value }: { value: number }) {
-  const percent = Math.round(value * 100)
-  const low = value < LOW_CONFIDENCE
+/**
+ * A flag, deliberately not a score.
+ *
+ * `confidence` is the model's own estimate, and self-reported confidence tracks
+ * real accuracy only loosely — a model is often confidently wrong. Rendering it
+ * as "신뢰도 94%" implies a precision that does not exist and invites the
+ * reviewer to skip the high numbers, which is the exact failure this review step
+ * exists to prevent. So the value only decides whether to raise a flag.
+ */
+function ReviewFlag() {
   return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums",
-        low
-          ? "border-warning/45 bg-warning/15 text-warning-foreground"
-          : "border-border bg-muted text-muted-foreground",
-      )}
-      title="AI 추출 신뢰도"
-    >
-      신뢰도 {percent}%
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/45 bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning-foreground">
+      <TriangleAlert className="size-3" />
+      확인 필요
     </span>
   )
 }

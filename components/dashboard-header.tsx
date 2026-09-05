@@ -27,9 +27,11 @@ export function DashboardHeader({
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <ReceiptText className="size-4.5" />
           </div>
-          <span className="text-sm font-semibold tracking-tight">바로</span>
+          <Button variant="ghost" className="text-sm font-semibold tracking-tight" onClick={onSignOut}>
+            바로
+          </Button>
         </div>
-
+      
         {role === "approver" && onNavigate && (
           <nav className="ml-4 hidden items-center gap-1 sm:flex">
             <NavItem

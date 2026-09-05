@@ -1,15 +1,15 @@
 /**
- * Wire types for the expense-policy feature.
+ * Wire types for the expense-policy endpoints.
  *
- * **These endpoints are not on the deployed backend yet.** They are served by
- * the temporary stub in `app/api/policies/*` until the real service implements
- * them; point `NEXT_PUBLIC_POLICY_API_URL` at it to switch over.
+ * Mirrors the deployed OpenAPI document at `${NEXT_PUBLIC_API_URL}/v3/api-docs`
+ * (`PolicyRulesetDto`, `PolicyRuleDto`, `PolicyEvaluationInputDto`, …). Keep this
+ * a faithful copy of that contract — Korean labels and derived values belong in
+ * `lib/policy.ts`.
  *
- * The design deliberately splits interpretation from judgment:
- *   1. a company uploads its 복무규정 PDF once → the AI extracts a structured
- *      `PolicyRuleset`, which a human reviews and activates;
- *   2. every expense is then judged against that stored ruleset, so the
- *      approver table needs no per-row AI call and verdicts never drift.
+ * The design splits interpretation from judgment: a company uploads its 복무규정
+ * PDF once and the server extracts a structured ruleset that a human reviews and
+ * activates; every expense is then judged against that stored ruleset, so no
+ * screen makes a per-row AI call and verdicts do not drift between renders.
  */
 
 import type { ExpenseCategory } from "@/types/api"
@@ -17,6 +17,10 @@ import type { ExpenseCategory } from "@/types/api"
 /** How a monetary limit is counted. */
 export type RuleScope = "PER_PERSON" | "PER_RECEIPT" | "PER_MONTH" | "PER_TRIP"
 
+/**
+ * `ARCHIVED` is what activation does to the previously active version — the
+ * server never deletes it, so a past decision keeps the clauses it cited.
+ */
 export type PolicyStatus = "DRAFT" | "ACTIVE" | "ARCHIVED"
 
 export type ComplianceLevel = "COMPLIANT" | "WARNING" | "VIOLATION"
@@ -24,52 +28,59 @@ export type ComplianceLevel = "COMPLIANT" | "WARNING" | "VIOLATION"
 /** What breaking a rule amounts to. A rule is never itself "compliant". */
 export type RuleSeverity = Exclude<ComplianceLevel, "COMPLIANT">
 
-/**
- * The passage a rule was extracted from. Every rule carries one so a verdict can
- * quote its basis instead of showing a bare number.
- */
-export interface PolicySourceClause {
-  /** e.g. `제12조 2항` */
-  article: string
-  /** Verbatim text from the PDF. */
-  text: string
-  page?: number
-}
-
-export interface PolicyRuleConditions {
+export interface RuleConditions {
   /** `false` → spend on Sat/Sun is flagged. */
-  weekendAllowed?: boolean
-  /** Spend logged after this hour (0–23) is flagged. */
+  weekendAllowed?: boolean | null
+  /** Spend logged at or after this hour (0–23) is flagged. */
   latestHour?: number | null
   minAttendees?: number | null
-  maxAttendees?: number | null
 }
 
+/**
+ * One extracted rule.
+ *
+ * The clause it came from is carried flat (`clauseArticle` / `clauseText` /
+ * `clausePage`) so a verdict can quote its basis instead of showing a bare
+ * number. Only `expenseCategory`, `scope`, `severity` and `clauseText` are
+ * guaranteed by the server; everything else can come back `null`.
+ */
 export interface PolicyRule {
   id: string
-  category: ExpenseCategory
+  expenseCategory: ExpenseCategory
   scope: RuleScope
   /** KRW cap; `null` for rules that only prohibit or require evidence. */
-  limit: number | null
-  conditions: PolicyRuleConditions
+  limitAmount?: number | null
+  conditions?: RuleConditions | null
   /** Documents the claim must attach, e.g. `참석자 명단`. */
-  requiredEvidence: string[]
+  requiredEvidence?: string[] | null
   /** Keywords that are never reimbursable, e.g. `유흥업소`. */
-  prohibitions: string[]
+  prohibitions?: string[] | null
   severity: RuleSeverity
-  /** Plain-language restatement shown to the reviewer. */
-  note: string
-  sourceClause: PolicySourceClause
-  /** Extraction confidence 0–1. Below 0.8 the console asks for a human check. */
-  confidence: number
+  /** Plain-language restatement shown to the reviewer. Often `null`. */
+  note?: string | null
+  /** e.g. `제12조 1항` */
+  clauseArticle?: string | null
+  /** Verbatim text from the PDF. */
+  clauseText: string
+  clausePage?: number | null
+  /**
+   * The model's own extraction confidence, 0–1. Below 0.8 the console flags the
+   * rule for a human check. Never rendered as a score — self-reported confidence
+   * is poorly calibrated, and a displayed percentage invites reviewers to skip
+   * the high ones. Treat it as a triage hint, not a measurement.
+   */
+  confidence?: number | null
 }
 
 export interface PolicyRuleset {
   id: string
+  companyId?: number
   version: number
   status: PolicyStatus
-  sourceFileName: string
-  pageCount?: number
+  sourceFileName?: string | null
+  /** SHA-256 of the upload; the server skips re-extraction on a repeat. */
+  sourceFileHash?: string | null
+  pageCount?: number | null
   createdAt: string
   activatedAt?: string | null
   rules: PolicyRule[]
@@ -77,7 +88,7 @@ export interface PolicyRuleset {
    * Clauses the extractor read but could not turn into a rule (references to
    * appendices, discretionary wording). Surfaced so nobody assumes full coverage.
    */
-  unmappedClauses: string[]
+  unmappedClauses?: string[] | null
 }
 
 /** Body of `POST /api/policies/evaluate`. */
@@ -86,20 +97,27 @@ export interface PolicyEvaluationInput {
   amount: number
   /** `YYYY-MM-DD`. */
   date: string
-  /** `HH:mm`, when known — receipts often carry a time the approval record does not. */
-  time?: string
+  /** Hour of day 0–23, when known — receipts carry a time the approval record does not. */
+  hour?: number
   merchant?: string
   itemName?: string
   purpose?: string
-  attendees?: number
+  attendeeCount?: number
+}
+
+/** The clause a verdict cites. */
+export interface CitedClause {
+  article?: string | null
+  text?: string | null
+  page?: number | null
 }
 
 export interface PolicyEvaluationResult {
   level: ComplianceLevel
   /** One sentence an approver can act on. */
   summary: string
-  citedClauses: PolicySourceClause[]
-  matchedRuleIds: string[]
+  citedClauses?: CitedClause[] | null
+  matchedRuleIds?: string[] | null
   rulesetVersion: number
   /**
    * `true` when a stored rule decided it outright; `false` when the case was

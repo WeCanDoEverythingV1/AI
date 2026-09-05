@@ -8,7 +8,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Field } from "@/components/field"
 import { PolicyRuleEditor, LOW_CONFIDENCE } from "@/components/policy-rule-editor"
 import { cn } from "@/lib/utils"
-import { usingPolicyStub } from "@/lib/api/client"
 import { isAbort, messageFor } from "@/lib/api/endpoints"
 import {
   Dialog,
@@ -126,7 +125,9 @@ export function PolicyConsole() {
       const extracted = await uploadPolicyDocument(picked, { signal: controller.signal })
       if (controller.signal.aborted) return
       setDraft(extracted)
-      setVersions((prev) => [extracted, ...prev])
+      // The upload replaces any earlier draft; the active ruleset stays until
+      // this one is activated.
+      setVersions((prev) => [extracted, ...prev.filter((v) => v.status !== "DRAFT")])
       setNotice(
         `${extracted.rules.length}개 조항을 추출했습니다. 활성화 전에 내용을 확인해 주세요.`,
       )
@@ -160,15 +161,34 @@ export function PolicyConsole() {
 
   const activate = async () => {
     if (!draft) return
+    const replaced = active
+
     setSaving(true)
     setError(null)
     try {
       // Persist edits first so the activated version is what the reviewer sees.
       await savePolicyRules(draft.id, draft.rules)
       const activated = await activatePolicy(draft.id)
+
+      // The server archives the old version rather than removing it, but this
+      // console keeps only the current one. Best-effort: the server refuses to
+      // delete a version an approval request still cites, and that refusal must
+      // not turn a successful activation into an error.
+      const stale = versions.filter((v) => v.id !== activated.id)
+      const removed = await Promise.allSettled(
+        stale.map((v) => deletePolicyRuleset(v.id)),
+      )
+      const kept = removed.filter((r) => r.status === "rejected").length
+
       setActive(activated)
       setDraft(null)
-      setNotice(`규정 v${activated.version}을 활성화했습니다.`)
+      setNotice(
+        kept > 0
+          ? `규정 v${activated.version}을 활성화했습니다. 이전 버전 ${kept}건은 결재에서 참조 중이라 보관됩니다.`
+          : replaced
+            ? `규정 v${activated.version}을 활성화하고 이전 v${replaced.version}은 삭제했습니다.`
+            : `규정 v${activated.version}을 활성화했습니다.`,
+      )
       await load()
     } catch (caught) {
       setError(messageFor(caught, "규정을 활성화하지 못했습니다."))
@@ -202,8 +222,10 @@ export function PolicyConsole() {
     }
   }
 
+  const unmapped = draft?.unmappedClauses ?? []
+
   const lowConfidenceCount =
-    draft?.rules.filter((r) => r.confidence < LOW_CONFIDENCE).length ?? 0
+    draft?.rules.filter((r) => (r.confidence ?? 0) < LOW_CONFIDENCE).length ?? 0
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -222,18 +244,6 @@ export function PolicyConsole() {
           </Badge>
         )}
       </div>
-
-      {usingPolicyStub && (
-        <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/45 bg-warning/12 p-3">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
-          <p className="text-xs leading-relaxed text-warning-foreground">
-            <span className="font-semibold">임시 서버로 동작 중입니다.</span> 실제 AI가
-            PDF를 읽는 것이 아니라 고정된 예시 규칙을 돌려줍니다. 저장한 규정은 개발 서버를
-            재시작하면 사라집니다. 백엔드가 준비되면{" "}
-            <code className="font-mono">NEXT_PUBLIC_POLICY_API_URL</code>을 설정하세요.
-          </p>
-        </div>
-      )}
 
       {error && (
         <div
@@ -355,13 +365,13 @@ export function PolicyConsole() {
 
               <PolicyRuleEditor rules={draft.rules} onChange={updateDraftRules} />
 
-              {draft.unmappedClauses.length > 0 && (
+              {unmapped.length > 0 && (
                 <div className="mt-4 rounded-lg border border-warning/45 bg-warning/12 p-3">
                   <p className="text-xs font-semibold text-warning-foreground">
-                    규칙으로 변환하지 못한 조항 {draft.unmappedClauses.length}건
+                    규칙으로 변환하지 못한 조항 {unmapped.length}건
                   </p>
                   <ul className="mt-1.5 space-y-1">
-                    {draft.unmappedClauses.map((clause) => (
+                    {unmapped.map((clause) => (
                       <li
                         key={clause}
                         className="flex gap-1.5 text-xs leading-relaxed text-muted-foreground"
@@ -375,6 +385,11 @@ export function PolicyConsole() {
               )}
 
               <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                {active && (
+                  <p className="mr-auto text-xs text-muted-foreground">
+                    활성화하면 기존 규정 v{active.version}은 삭제됩니다.
+                  </p>
+                )}
                 <Button
                   variant="outline"
                   onClick={() => void save()}
@@ -603,8 +618,8 @@ type TestInput = {
   category: ExpenseCategory
   amount: string
   date: string
-  time: string
-  attendees: string
+  hour: string
+  attendeeCount: string
   merchant: string
   purpose: string
 }
@@ -613,8 +628,8 @@ const emptyTest: TestInput = {
   category: "MEALS",
   amount: "",
   date: "",
-  time: "",
-  attendees: "",
+  hour: "",
+  attendeeCount: "",
   merchant: "",
   purpose: "",
 }
@@ -649,10 +664,10 @@ function PolicyTestConsole({ active }: { active: PolicyRuleset | null }) {
           category: input.category,
           amount,
           date: input.date || new Date().toISOString().slice(0, 10),
-          time: input.time || undefined,
+          hour: input.hour ? Number(input.hour) : undefined,
           merchant: input.merchant.trim() || undefined,
           purpose: input.purpose.trim() || undefined,
-          attendees: input.attendees ? Number(input.attendees) : undefined,
+          attendeeCount: input.attendeeCount ? Number(input.attendeeCount) : undefined,
         }),
       )
     } catch (caught) {
@@ -720,20 +735,24 @@ function PolicyTestConsole({ active }: { active: PolicyRuleset | null }) {
               onChange={(e) => update("date", e.target.value)}
             />
           </Field>
-          <Field id="test-time" label="사용 시각">
+          {/* The API takes an integer hour (0–23), not a wall-clock string. */}
+          <Field id="test-hour" label="사용 시각 (시)">
             <Input
-              id="test-time"
-              type="time"
-              value={input.time}
-              onChange={(e) => update("time", e.target.value)}
+              id="test-hour"
+              inputMode="numeric"
+              value={input.hour}
+              onChange={(e) =>
+                update("hour", e.target.value.replace(/[^0-9]/g, "").slice(0, 2))
+              }
+              placeholder="23"
             />
           </Field>
           <Field id="test-attendees" label="참석 인원">
             <Input
               id="test-attendees"
               inputMode="numeric"
-              value={input.attendees}
-              onChange={(e) => update("attendees", e.target.value.replace(/[^0-9]/g, ""))}
+              value={input.attendeeCount}
+              onChange={(e) => update("attendeeCount", e.target.value.replace(/[^0-9]/g, ""))}
               placeholder="2"
             />
           </Field>
@@ -810,6 +829,7 @@ const verdictStyles: Record<
 
 function VerdictPanel({ result }: { result: PolicyEvaluationResult }) {
   const style = verdictStyles[result.level]
+  const cited = result.citedClauses ?? []
 
   return (
     <div>
@@ -830,12 +850,12 @@ function VerdictPanel({ result }: { result: PolicyEvaluationResult }) {
 
       <p className="mt-3 text-sm leading-relaxed text-foreground">{result.summary}</p>
 
-      {result.citedClauses.length > 0 && (
+      {cited.length > 0 && (
         <div className="mt-4 space-y-2.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             근거 조항
           </p>
-          {result.citedClauses.map((clause) => (
+          {cited.map((clause) => (
             <figure key={clause.article} className="border-l-2 border-border pl-3">
               <blockquote className="text-xs leading-relaxed text-muted-foreground">
                 {clause.text}
