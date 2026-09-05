@@ -35,9 +35,9 @@ export type ReceiptAnalysis = {
   date?: string
   /** Line item / description. */
   item?: string
-  /** Spend category the AI assigned (Meals, Travel, …). */
+  /** Spend category the AI assigned (식비, 출장, …). */
   category?: string
-  /** ISO-4217 code; treated as USD when the backend omits it. */
+  /** ISO-4217 code; treated as KRW when the backend omits it. */
   currency?: string
   /** OCR confidence, 0–1. Below 0.8 the UI nudges the user to double-check. */
   confidence?: number
@@ -95,10 +95,10 @@ export function validateReceiptFile(file: File): string | null {
     ACCEPTED_TYPES.includes(file.type) ||
     (file.type === "" && /\.(png|jpe?g|webp|heic|heif|pdf)$/i.test(file.name))
 
-  if (!typeOk) return "Unsupported file type — upload a PNG, JPG, WEBP or PDF."
-  if (file.size === 0) return "That file is empty."
+  if (!typeOk) return "지원하지 않는 파일 형식입니다 — PNG, JPG, WEBP 또는 PDF 파일을 올려 주세요."
+  if (file.size === 0) return "비어 있는 파일입니다."
   if (file.size > MAX_FILE_BYTES) {
-    return `File is ${(file.size / 1024 / 1024).toFixed(1)}MB — the limit is 10MB.`
+    return `파일 크기가 ${(file.size / 1024 / 1024).toFixed(1)}MB입니다 — 최대 10MB까지 올릴 수 있습니다.`
   }
   return null
 }
@@ -190,12 +190,12 @@ async function request(
     if (signal?.aborted) throw error // caller cancelled on purpose — let it bubble
     if (controller.signal.aborted) {
       throw new ReceiptApiError(
-        "The server took too long to respond. Please try again.",
+        "서버 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해 주세요.",
         { code: "timeout" },
       )
     }
     throw new ReceiptApiError(
-      "Could not reach the analysis service. Check your connection and try again.",
+      "분석 서버에 연결할 수 없습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
       { code: "network" },
     )
   } finally {
@@ -215,12 +215,12 @@ async function request(
 async function readErrorMessage(response: Response): Promise<string> {
   const fallback =
     response.status === 413
-      ? "That file is too large for the server."
+      ? "서버가 처리하기에 파일이 너무 큽니다."
       : response.status === 415
-        ? "The server rejected that file type."
+        ? "서버가 해당 파일 형식을 거부했습니다."
         : response.status >= 500
-          ? "The analysis service failed. Please try again in a moment."
-          : `Request failed (${response.status}).`
+          ? "분석 서비스에 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+          : `요청에 실패했습니다 (${response.status}).`
 
   try {
     const text = await response.text()
@@ -241,7 +241,7 @@ async function readJson(response: Response): Promise<unknown> {
   try {
     return await response.json()
   } catch {
-    throw new ReceiptApiError("The server returned a malformed response.", {
+    throw new ReceiptApiError("서버 응답을 해석할 수 없습니다.", {
       code: "bad_response",
     })
   }
@@ -259,7 +259,7 @@ function normalizeAnalysis(payload: unknown): ReceiptAnalysis {
     : root) as Record<string, unknown> | null
 
   if (!raw || typeof raw !== "object") {
-    throw new ReceiptApiError("The server returned an unexpected response shape.", {
+    throw new ReceiptApiError("서버가 예상과 다른 형식으로 응답했습니다.", {
       code: "bad_response",
     })
   }
@@ -267,7 +267,7 @@ function normalizeAnalysis(payload: unknown): ReceiptAnalysis {
   const amount = toNumber(raw.amount)
   if (raw.id === undefined || amount === null) {
     throw new ReceiptApiError(
-      "The receipt could not be read. Try a sharper photo, or fill the form in manually.",
+      "영수증을 읽지 못했습니다. 더 선명한 사진으로 다시 시도하거나 직접 입력해 주세요.",
       { code: "incomplete_analysis" },
     )
   }
@@ -329,7 +329,7 @@ function toCompliance(value: unknown): ComplianceCheck | undefined {
 
   return {
     level,
-    title: toText(raw.title) || "AI policy check",
+    title: toText(raw.title) || "AI 규정 검토",
     detail: toText(raw.detail),
   }
 }

@@ -16,36 +16,36 @@ export function UserSelection({ onSelect }: { onSelect: (role: Role) => void }) 
         <div className="mb-10 flex flex-col items-center text-center">
           <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm">
             <Sparkles className="size-3.5 text-primary" />
-            AI-powered finance operations
+            AI 기반 재무 자동화
           </div>
           <div className="mt-6 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
             <ReceiptText className="size-7" />
           </div>
           <h1 className="mt-5 text-3xl font-semibold tracking-tight text-balance">
-            Welcome to Ledgerly
+            바로에 오신 것을 환영합니다
           </h1>
           <p className="mt-2 text-pretty text-sm leading-relaxed text-muted-foreground">
-            Receipt approvals and SaaS spend, automated. Choose how you want to sign in.
+            영수증 결재와 SaaS 지출을 자동으로. 어떤 역할로 시작하시겠어요?
           </p>
         </div>
 
         <div className="flex flex-col gap-3">
           <RoleButton
             icon={<UserRound className="size-5" />}
-            title="Continue as Employee"
-            description="Upload receipts and submit approval requests"
+            title="사원으로 시작하기"
+            description="영수증을 올리고 결재를 요청합니다"
             onClick={() => onSelect("employee")}
           />
           <RoleButton
             icon={<ShieldCheck className="size-5" />}
-            title="Continue as Approver"
-            description="Review requests and monitor company spend"
+            title="결재자로 시작하기"
+            description="결재를 검토하고 회사 지출을 관리합니다"
             onClick={() => onSelect("approver")}
           />
         </div>
 
         <p className="mt-8 text-center text-xs text-muted-foreground">
-          Demo experience · No credentials required
+          데모 환경 · 로그인 정보가 필요 없습니다
         </p>
       </div>
     </main>

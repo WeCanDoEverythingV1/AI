@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import {
   currency,
+  initialsOf,
   pendingRequests,
   type ApprovalRequest,
   type RiskLevel,
@@ -37,7 +38,6 @@ import {
   Check,
   CheckCircle2,
   Clock,
-  DollarSign,
   FileText,
   Layers,
   Plus,
@@ -47,6 +47,7 @@ import {
   TriangleAlert,
   User,
   Wallet,
+  Wallet2,
   X,
 } from "lucide-react"
 
@@ -74,11 +75,9 @@ export function ApproverDashboard() {
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-balance">
-            Pending approvals
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-balance">결재 대기</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review AI-drafted receipt requests from your team.
+            팀원이 올린 AI 초안 영수증 요청을 검토하세요.
           </p>
         </div>
         <AddRequestDialog onAdd={addRequest} />
@@ -87,19 +86,19 @@ export function ApproverDashboard() {
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <StatCard
           icon={<Clock className="size-4" />}
-          label="Awaiting review"
-          value={String(pending.length)}
-          sub={`${currency(pendingTotal)} in flight`}
+          label="검토 대기"
+          value={`${pending.length}건`}
+          sub={`합계 ${currency(pendingTotal)}`}
         />
         <StatCard
           icon={<CheckCircle2 className="size-4 text-success" />}
-          label="Approved today"
-          value={String(approvedCount)}
+          label="오늘 승인"
+          value={`${approvedCount}건`}
         />
         <StatCard
           icon={<Wallet className="size-4" />}
-          label="Rejected today"
-          value={String(rejectedCount)}
+          label="오늘 반려"
+          value={`${rejectedCount}건`}
         />
       </div>
 
@@ -109,22 +108,22 @@ export function ApproverDashboard() {
             <div className="flex size-12 items-center justify-center rounded-full bg-success/10">
               <CheckCircle2 className="size-6 text-success" />
             </div>
-            <p className="mt-4 text-sm font-medium text-foreground">All caught up</p>
+            <p className="mt-4 text-sm font-medium text-foreground">모두 처리했습니다</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Every pending request has been reviewed.
+              대기 중인 요청을 전부 검토했습니다.
             </p>
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-5">Employee</TableHead>
-                <TableHead>Merchant</TableHead>
-                <TableHead className="hidden lg:table-cell">Purpose</TableHead>
-                <TableHead>AI Risk Analysis</TableHead>
-                <TableHead className="hidden sm:table-cell">Date</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="pr-5 text-right">Decision</TableHead>
+                <TableHead className="pl-5">신청자</TableHead>
+                <TableHead>가맹점</TableHead>
+                <TableHead className="hidden lg:table-cell">사용 내역</TableHead>
+                <TableHead>AI 위험 분석</TableHead>
+                <TableHead className="hidden sm:table-cell">사용일자</TableHead>
+                <TableHead className="text-right">금액</TableHead>
+                <TableHead className="pr-5 text-right">결재</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -162,31 +161,22 @@ const emptyDraft: NewRequestDraft = {
 }
 
 const riskPresets: { level: RiskLevel; short: string; label: string }[] = [
-  { level: "compliant", short: "Compliant", label: "Policy Compliant" },
-  { level: "warning", short: "Warning", label: "Warning: Needs review" },
-  { level: "high", short: "High risk", label: "High Risk: Manual review" },
+  { level: "compliant", short: "정상", label: "규정 준수" },
+  { level: "warning", short: "주의", label: "주의: 검토 필요" },
+  { level: "high", short: "위험", label: "위험: 수동 검토 필요" },
 ]
 
-const categoryOptions = ["Meals", "Travel", "Software", "Lodging", "Equipment", "Other"]
-
-function initialsOf(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "??"
-  return parts
-    .slice(0, 2)
-    .map((p) => p[0].toUpperCase())
-    .join("")
-}
+const categoryOptions = ["식비", "출장", "소프트웨어", "숙박", "장비", "기타"]
 
 function formatDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   const date = match
     ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
     : new Date()
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
+  return date.toLocaleDateString("ko-KR", {
     year: "numeric",
+    month: "long",
+    day: "numeric",
   })
 }
 
@@ -208,11 +198,11 @@ function buildRequest(
     employee: draft.employee.trim(),
     initials: initialsOf(draft.employee),
     merchant: draft.merchant.trim(),
-    category: draft.category.trim() || "Other",
+    category: draft.category.trim() || "기타",
     date: formatDate(draft.date),
     amount: Number.parseFloat(draft.amount.replace(/[^0-9.]/g, "")) || 0,
     item: draft.item.trim() || draft.merchant.trim(),
-    purpose: draft.purpose.trim() || "Manually added by approver.",
+    purpose: draft.purpose.trim() || "결재자가 직접 추가한 요청입니다.",
     risk: { level: preset.level, label: preset.label },
   }
 }
@@ -236,12 +226,12 @@ function AddRequestDialog({ onAdd }: { onAdd: (draft: NewRequestDraft) => void }
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!draft.employee.trim() || !draft.merchant.trim()) {
-      setError("Employee and merchant are required.")
+      setError("신청자와 가맹점은 필수 항목입니다.")
       return
     }
     const amount = Number.parseFloat(draft.amount.replace(/[^0-9.]/g, ""))
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter an amount greater than 0.")
+      setError("0보다 큰 금액을 입력해 주세요.")
       return
     }
     onAdd(draft)
@@ -252,44 +242,44 @@ function AddRequestDialog({ onAdd }: { onAdd: (draft: NewRequestDraft) => void }
     <Dialog open={open} onOpenChange={openChange}>
       <DialogTrigger render={<Button variant="outline" size="sm" className="gap-1" />}>
         <Plus />
-        추가
+        요청 추가
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add a request</DialogTitle>
+          <DialogTitle>요청 직접 추가</DialogTitle>
           <DialogDescription>
-            Log a receipt request manually — it drops straight into the pending queue.
+            영수증 요청을 직접 입력하면 결재 대기 목록에 바로 올라갑니다.
           </DialogDescription>
         </DialogHeader>
 
         <form id="add-request-form" onSubmit={submit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field id="new-employee" label="Employee" icon={<User className="size-4" />}>
+            <Field id="new-employee" label="신청자" icon={<User className="size-4" />}>
               <Input
                 id="new-employee"
                 value={draft.employee}
                 onChange={(e) => update("employee", e.target.value)}
-                placeholder="Sarah Chen"
+                placeholder="김서연"
               />
             </Field>
-            <Field id="new-merchant" label="Merchant" icon={<Store className="size-4" />}>
+            <Field id="new-merchant" label="가맹점" icon={<Store className="size-4" />}>
               <Input
                 id="new-merchant"
                 value={draft.merchant}
                 onChange={(e) => update("merchant", e.target.value)}
-                placeholder="Blue Bottle Coffee"
+                placeholder="블루보틀 삼청"
               />
             </Field>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field id="new-category" label="Category" icon={<Layers className="size-4" />}>
+            <Field id="new-category" label="분류" icon={<Layers className="size-4" />}>
               <Input
                 id="new-category"
                 list="new-category-options"
                 value={draft.category}
                 onChange={(e) => update("category", e.target.value)}
-                placeholder="Meals"
+                placeholder="식비"
               />
               <datalist id="new-category-options">
                 {categoryOptions.map((c) => (
@@ -297,7 +287,7 @@ function AddRequestDialog({ onAdd }: { onAdd: (draft: NewRequestDraft) => void }
                 ))}
               </datalist>
             </Field>
-            <Field id="new-date" label="Date" icon={<Calendar className="size-4" />}>
+            <Field id="new-date" label="사용일자" icon={<Calendar className="size-4" />}>
               <Input
                 id="new-date"
                 type="date"
@@ -305,39 +295,39 @@ function AddRequestDialog({ onAdd }: { onAdd: (draft: NewRequestDraft) => void }
                 onChange={(e) => update("date", e.target.value)}
               />
             </Field>
-            <Field id="new-amount" label="Amount" icon={<DollarSign className="size-4" />}>
+            <Field id="new-amount" label="금액 (원)" icon={<Wallet2 className="size-4" />}>
               <Input
                 id="new-amount"
-                inputMode="decimal"
+                inputMode="numeric"
                 value={draft.amount}
                 onChange={(e) => update("amount", e.target.value)}
-                placeholder="0.00"
+                placeholder="0"
               />
             </Field>
           </div>
 
-          <Field id="new-item" label="Item name" icon={<Tag className="size-4" />}>
+          <Field id="new-item" label="품목명" icon={<Tag className="size-4" />}>
             <Input
               id="new-item"
               value={draft.item}
               onChange={(e) => update("item", e.target.value)}
-              placeholder="Team offsite coffee"
+              placeholder="팀 오프사이트 커피"
             />
           </Field>
 
-          <Field id="new-purpose" label="Purpose" icon={<FileText className="size-4" />}>
+          <Field id="new-purpose" label="사용 목적" icon={<FileText className="size-4" />}>
             <Textarea
               id="new-purpose"
               rows={2}
               value={draft.purpose}
               onChange={(e) => update("purpose", e.target.value)}
-              placeholder="Client onboarding kickoff with the Acme account team."
+              placeholder="에이콘 계정팀과 진행한 고객 온보딩 킥오프 미팅."
               className="resize-none"
             />
           </Field>
 
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">AI risk analysis</Label>
+            <Label className="text-xs text-muted-foreground">AI 위험 분석</Label>
             <div className="flex flex-wrap gap-2">
               {riskPresets.map((r) => (
                 <Button
@@ -359,10 +349,10 @@ function AddRequestDialog({ onAdd }: { onAdd: (draft: NewRequestDraft) => void }
         </form>
 
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <DialogClose render={<Button variant="outline" />}>취소</DialogClose>
           <Button type="submit" form="add-request-form" className="gap-1">
             <Plus className="size-4" />
-            Add to queue
+            대기 목록에 추가
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -423,7 +413,7 @@ function Row({
             className="gap-1 bg-success text-success-foreground hover:bg-success/90"
           >
             <Check className="size-4" />
-            <span className="hidden sm:inline">Approve</span>
+            <span className="hidden sm:inline">승인</span>
           </Button>
           <Button
             size="sm"
@@ -432,7 +422,7 @@ function Row({
             className="gap-1 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             <X className="size-4" />
-            <span className="hidden sm:inline">Reject</span>
+            <span className="hidden sm:inline">반려</span>
           </Button>
         </div>
       </TableCell>

@@ -39,6 +39,15 @@ const severityStyles: Record<string, string> = {
   low: "bg-muted text-muted-foreground",
 }
 
+const severityLabels: Record<string, string> = {
+  high: "높음",
+  medium: "보통",
+  low: "낮음",
+}
+
+/** Won amounts run to seven digits, so the axis reads in 만 원 units. */
+const compactWon = (value: number) => `${Math.round(value / 10000).toLocaleString("ko-KR")}만`
+
 export function SubscriptionAlert() {
   const [stage, setStage] = useState<Stage>("idle")
   const [selected, setSelected] = useState<WastedSubscription | null>(null)
@@ -62,9 +71,9 @@ export function SubscriptionAlert() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">Spend insights</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">지출 인사이트</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Detect unused or wasted SaaS subscription fees across the company.
+          회사 전체에서 쓰이지 않거나 낭비되는 SaaS 구독료를 찾아냅니다.
         </p>
       </div>
 
@@ -74,14 +83,13 @@ export function SubscriptionAlert() {
           <div className="max-w-md">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-card px-2.5 py-1 text-[11px] font-medium text-primary">
               <Sparkles className="size-3" />
-              AI Spend Analyzer
+              AI 지출 분석기
             </div>
             <h2 className="mt-3 text-lg font-semibold tracking-tight text-foreground">
-              Find wasted subscription spend
+              낭비되는 구독료 찾기
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Run the analyzer to surface idle seats, duplicate tools and cancellation
-              opportunities.
+              분석을 실행하면 미사용 좌석, 중복 도구, 해지 대상을 한 번에 찾아 줍니다.
             </p>
           </div>
           <Button
@@ -93,12 +101,12 @@ export function SubscriptionAlert() {
             {stage === "scanning" ? (
               <>
                 <Loader2 className="size-4 animate-spin" />
-                Analyzing spend…
+                지출 분석 중…
               </>
             ) : (
               <>
                 <Wand2 className="size-4" />
-                {stage === "revealed" ? "Re-run analysis" : "Run Magic Analysis"}
+                {stage === "revealed" ? "다시 분석하기" : "AI 분석 실행"}
               </>
             )}
           </Button>
@@ -116,20 +124,20 @@ export function SubscriptionAlert() {
             <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 sm:col-span-1">
               <div className="flex items-center gap-2 text-xs font-medium text-destructive">
                 <AlertTriangle className="size-4" />
-                Estimated monthly waste
+                월 예상 낭비액
               </div>
               <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
                 {currency(totalWaste)}
               </p>
               <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                 <TrendingDown className="size-3.5 text-success" />
-                {currency(totalWaste * 12)} annualized savings potential
+                연간 {currency(totalWaste * 12)} 절감 가능
               </p>
             </div>
 
             <div className="rounded-xl border border-border bg-card p-4 shadow-sm sm:col-span-2">
               <p className="mb-1 text-xs font-medium text-muted-foreground">
-                Waste by subscription (monthly)
+                구독별 월 낭비액
               </p>
               <div className="h-32">
                 <ResponsiveContainer width="100%" height="100%">
@@ -144,7 +152,7 @@ export function SubscriptionAlert() {
                       tickLine={false}
                       axisLine={false}
                       tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                      tickFormatter={(v) => `$${v}`}
+                      tickFormatter={compactWon}
                     />
                     <Tooltip
                       cursor={{ fill: "var(--muted)" }}
@@ -154,7 +162,7 @@ export function SubscriptionAlert() {
                         background: "var(--card)",
                         fontSize: 12,
                       }}
-                      formatter={(v: number) => [currency(v), "Monthly waste"]}
+                      formatter={(v) => [currency(Number(v)), "월 낭비액"]}
                     />
                     <Bar dataKey="waste" radius={[6, 6, 0, 0]}>
                       {chartData.map((entry) => (
@@ -177,7 +185,7 @@ export function SubscriptionAlert() {
           </div>
 
           <h3 className="mb-3 text-sm font-medium text-foreground">
-            Recommendations ({wastedSubscriptions.length})
+            추천 조치 ({wastedSubscriptions.length}건)
           </h3>
           <ul className="space-y-2.5">
             {wastedSubscriptions.map((sub) => {
@@ -198,24 +206,21 @@ export function SubscriptionAlert() {
                           {sub.name}
                         </p>
                         <Badge
-                          className={cn(
-                            "font-medium capitalize",
-                            severityStyles[sub.severity],
-                          )}
+                          className={cn("font-medium", severityStyles[sub.severity])}
                         >
-                          {sub.severity}
+                          {severityLabels[sub.severity]}
                         </Badge>
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {sub.activeSeats}/{sub.seats} seats active · last used {sub.lastUsed}
+                        좌석 {sub.activeSeats}/{sub.seats} 사용 중 · 마지막 사용{" "}
+                        {sub.lastUsed}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between gap-4 sm:justify-end">
                     <div className="flex items-center gap-1.5 rounded-lg bg-destructive/5 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-destructive">
-                      <ArrowDownRight className="size-4" />
-                      {currency(waste)}/mo
+                      <ArrowDownRight className="size-4" />월 {currency(waste)}
                     </div>
                     <Button
                       variant={sub.action === "cancel" ? "outline" : "secondary"}
@@ -243,10 +248,9 @@ export function SubscriptionAlert() {
           <div className="flex size-12 items-center justify-center rounded-full bg-accent">
             <Wand2 className="size-6 text-primary" />
           </div>
-          <p className="mt-4 text-sm font-medium text-foreground">No analysis yet</p>
+          <p className="mt-4 text-sm font-medium text-foreground">아직 분석 결과가 없습니다</p>
           <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-            Hit the magic button above to reveal wasted subscription costs and savings
-            recommendations.
+            위의 버튼을 눌러 낭비되는 구독료와 절감 방안을 확인하세요.
           </p>
         </div>
       )}
@@ -269,7 +273,7 @@ function EmailDraftDialog({
   const [copied, setCopied] = useState(false)
 
   const email = sub ? buildVendorEmail(sub) : null
-  const fullText = email ? `Subject: ${email.subject}\n\n${email.body}` : ""
+  const fullText = email ? `제목: ${email.subject}\n\n${email.body}` : ""
 
   const copy = async () => {
     try {
@@ -293,14 +297,13 @@ function EmailDraftDialog({
         <DialogHeader className="space-y-2 border-b border-border p-5">
           <div className="inline-flex w-fit items-center gap-1.5 rounded-full border border-primary/20 bg-accent px-2.5 py-1 text-[11px] font-medium text-primary">
             <Sparkles className="size-3" />
-            AI-drafted vendor email
+            AI가 작성한 공급사 메일
           </div>
           <DialogTitle className="text-base">
-            {sub?.action === "cancel" ? "Cancellation request" : "Plan downgrade request"} ·{" "}
-            {sub?.name}
+            {sub?.action === "cancel" ? "해지 요청" : "플랜 축소 요청"} · {sub?.name}
           </DialogTitle>
           <DialogDescription>
-            Review the draft below, then copy it to send from your email client.
+            초안을 확인한 뒤 복사해서 메일로 보내세요.
           </DialogDescription>
         </DialogHeader>
 
@@ -308,7 +311,7 @@ function EmailDraftDialog({
           <div className="max-h-[50vh] overflow-y-auto p-5">
             <div className="rounded-lg border border-border bg-secondary/50 p-4">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Subject
+                제목
               </p>
               <p className="mt-0.5 text-sm font-medium text-foreground">{email.subject}</p>
               <div className="my-3 h-px bg-border" />
@@ -320,17 +323,17 @@ function EmailDraftDialog({
         )}
 
         <DialogFooter className="flex-row items-center justify-between gap-3 border-t border-border p-5">
-          <p className="text-xs text-muted-foreground">Generated by Ledgerly AI · editable</p>
+          <p className="text-xs text-muted-foreground">바로 AI가 작성 · 수정 가능</p>
           <Button onClick={copy} className="gap-1.5">
             {copied ? (
               <>
                 <Check className="size-4" />
-                Copied
+                복사됨
               </>
             ) : (
               <>
                 <Copy className="size-4" />
-                Copy Draft
+                초안 복사
               </>
             )}
           </Button>

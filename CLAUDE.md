@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-"Ledgerly" — an AI-powered receipt approval and SaaS spend management demo, built with Next.js App Router. Mostly a UI prototype: there is no database, and the approver/spend screens are driven by static arrays in `lib/mock-data.ts`.
+"바로" (Baro) — an AI-powered receipt approval and SaaS spend management demo, built with Next.js App Router. All user-facing copy and mock data are Korean and amounts are KRW (`currency()` in `lib/mock-data.ts` formats `ko-KR`/KRW). Mostly a UI prototype: there is no database, and the approver/spend screens are driven by static arrays in `lib/mock-data.ts`.
 
 The one real data flow is the employee receipt upload: `components/employee-dashboard.tsx` POSTs the file to `/api/approval-request` and renders whatever comes back. That endpoint is expected to be served by the separate backend in `AI/` (its own git repo, currently just a README); until it exists, `app/api/approval-request/` holds a development stub implementing the same contract. Point `NEXT_PUBLIC_API_BASE_URL` at the real service to switch over (see `.env.example`).
 

@@ -14,11 +14,11 @@ import {
   validateReceiptFile,
   ReceiptApiError,
   type ReceiptAnalysis,
+  type ReceiptStatus,
 } from "@/lib/receipt-api"
 import {
   Calendar,
   CheckCircle2,
-  DollarSign,
   FileText,
   Loader2,
   RotateCcw,
@@ -29,6 +29,7 @@ import {
   TriangleAlert,
   UploadCloud,
   User,
+  Wallet2,
 } from "lucide-react"
 
 type FormState = {
@@ -49,12 +50,19 @@ const emptyForm: FormState = {
   employeeName: "",
 }
 
+const statusLabels: Record<ReceiptStatus, string> = {
+  draft: "작성 중",
+  pending: "결재 대기",
+  approved: "승인 완료",
+  rejected: "반려됨",
+}
+
 /** Prefill the editable form from the analysis so the user can correct it. */
 function toFormState(analysis: ReceiptAnalysis): FormState {
   return {
     merchant: analysis.merchant,
     date: analysis.date ?? "",
-    amount: analysis.amount.toFixed(2),
+    amount: String(analysis.amount),
     item: analysis.item ?? "",
     purpose: analysis.purpose,
     employeeName: analysis.employeeName,
@@ -159,11 +167,11 @@ export function EmployeeDashboard() {
 
     const amount = Number(form.amount)
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter a valid amount before submitting.")
+      setError("제출하기 전에 올바른 금액을 입력해 주세요.")
       return
     }
     if (!form.merchant.trim()) {
-      setError("Merchant is required before submitting.")
+      setError("제출하기 전에 가맹점을 입력해 주세요.")
       return
     }
 
@@ -204,11 +212,9 @@ export function EmployeeDashboard() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">
-          Submit a receipt
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">영수증 제출</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Upload a photo and our AI drafts the approval request for you to review.
+          사진을 올리면 AI가 결재 요청서를 대신 작성해 드립니다.
         </p>
       </div>
 
@@ -216,12 +222,12 @@ export function EmployeeDashboard() {
         {/* Upload area */}
         <section aria-labelledby="upload-heading">
           <h2 id="upload-heading" className="mb-3 text-sm font-medium text-foreground">
-            Receipt photo upload
+            영수증 사진 업로드
           </h2>
           <div
             role="button"
             tabIndex={busy ? -1 : 0}
-            aria-label="Upload receipt photo. Drag and drop or activate to browse files."
+            aria-label="영수증 사진 업로드. 파일을 끌어다 놓거나 눌러서 선택하세요."
             aria-busy={busy}
             onClick={() => {
               if (!busy) inputRef.current?.click()
@@ -262,10 +268,10 @@ export function EmployeeDashboard() {
                   <Loader2 className="size-6 animate-spin text-primary" />
                 </div>
                 <p className="mt-4 text-sm font-medium text-foreground">
-                  Reading your receipt…
+                  영수증을 읽는 중…
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Extracting merchant, amount and line items — this can take a few seconds
+                  가맹점, 금액, 품목을 추출하고 있어요 — 몇 초 정도 걸릴 수 있습니다
                 </p>
               </>
             ) : file ? (
@@ -273,7 +279,7 @@ export function EmployeeDashboard() {
                 {previewUrl ? (
                   <img
                     src={previewUrl}
-                    alt="Uploaded receipt preview"
+                    alt="업로드한 영수증 미리보기"
                     className="max-h-32 rounded-md border border-border object-contain"
                   />
                 ) : (
@@ -286,8 +292,8 @@ export function EmployeeDashboard() {
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {analysis
-                    ? "Scanned successfully — review the draft on the right"
-                    : "Upload failed — try again below"}
+                    ? "인식 완료 — 오른쪽에서 초안을 확인하세요"
+                    : "인식 실패 — 아래에서 다시 시도해 주세요"}
                 </p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                   {!analysis && (
@@ -301,7 +307,7 @@ export function EmployeeDashboard() {
                       }}
                     >
                       <RotateCcw className="size-3.5" />
-                      Retry scan
+                      다시 인식
                     </Button>
                   )}
                   <Button
@@ -312,7 +318,7 @@ export function EmployeeDashboard() {
                       reset()
                     }}
                   >
-                    Upload another
+                    다른 파일 올리기
                   </Button>
                 </div>
               </>
@@ -322,10 +328,10 @@ export function EmployeeDashboard() {
                   <UploadCloud className="size-6 text-primary" />
                 </div>
                 <p className="mt-4 text-sm font-medium text-foreground">
-                  Drag &amp; drop your receipt here
+                  여기에 영수증을 끌어다 놓으세요
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  or click to browse · PNG, JPG or PDF up to 10MB
+                  또는 클릭해서 선택 · PNG, JPG, PDF · 최대 10MB
                 </p>
               </>
             )}
@@ -344,8 +350,8 @@ export function EmployeeDashboard() {
           <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-border bg-secondary/60 p-3">
             <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Ledgerly AI reads the receipt, categorizes the spend and pre-fills the request.
-              You stay in control — edit anything before submitting.
+              바로 AI가 영수증을 읽고 지출을 분류해 요청서를 미리 채워 줍니다. 제출 전에
+              무엇이든 직접 수정할 수 있습니다.
             </p>
           </div>
         </section>
@@ -354,12 +360,12 @@ export function EmployeeDashboard() {
         <section aria-labelledby="form-heading">
           <div className="mb-3 flex items-center justify-between">
             <h2 id="form-heading" className="text-sm font-medium text-foreground">
-              Approval request
+              결재 요청서
             </h2>
             {analysis && stage !== "submitted" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-foreground">
                 <Sparkles className="size-3" />
-                AI auto-filled
+                AI 자동 입력
               </span>
             )}
           </div>
@@ -374,19 +380,18 @@ export function EmployeeDashboard() {
                   <CheckCircle2 className="size-7 text-success" />
                 </div>
                 <p className="mt-4 text-base font-semibold text-foreground">
-                  Submitted for approval
+                  결재 요청이 접수되었습니다
                 </p>
                 <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-                  Your request for {form.merchant || "this receipt"} was routed to your
-                  approver.
+                  {form.merchant || "이 영수증"} 건이 결재자에게 전달되었습니다.
                 </p>
                 {analysis && (
                   <p className="mt-2 font-mono text-xs text-muted-foreground">
-                    {analysis.id} · {analysis.status}
+                    {analysis.id} · {statusLabels[analysis.status]}
                   </p>
                 )}
                 <Button variant="outline" size="sm" className="mt-5" onClick={reset}>
-                  Submit another receipt
+                  다른 영수증 제출하기
                 </Button>
               </div>
             ) : (
@@ -402,7 +407,7 @@ export function EmployeeDashboard() {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                       <span className="font-mono">{analysis.id}</span>
                       <span aria-hidden>·</span>
-                      <span>Scanned {formatTimestamp(analysis.createdAt)}</span>
+                      <span>{formatTimestamp(analysis.createdAt)} 인식</span>
                       {analysis.category && (
                         <>
                           <span aria-hidden>·</span>
@@ -412,7 +417,7 @@ export function EmployeeDashboard() {
                       {analysis.confidence !== undefined && (
                         <>
                           <span aria-hidden>·</span>
-                          <span>{Math.round(analysis.confidence * 100)}% confidence</span>
+                          <span>신뢰도 {Math.round(analysis.confidence * 100)}%</span>
                         </>
                       )}
                     </div>
@@ -427,8 +432,7 @@ export function EmployeeDashboard() {
 
                     {lowConfidence && (
                       <p className="text-xs leading-relaxed text-warning-foreground">
-                        The scan was not fully confident — double-check every field before
-                        submitting.
+                        인식 정확도가 낮습니다 — 제출 전에 모든 항목을 다시 확인해 주세요.
                       </p>
                     )}
                   </>
@@ -437,17 +441,17 @@ export function EmployeeDashboard() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field
                     id="merchant"
-                    label="Merchant / Usage"
+                    label="가맹점 / 사용처"
                     icon={<Store className="size-4" />}
                   >
                     <Input
                       id="merchant"
                       value={form.merchant}
                       onChange={(e) => update("merchant", e.target.value)}
-                      placeholder="Awaiting scan…"
+                      placeholder="인식 대기 중…"
                     />
                   </Field>
-                  <Field id="date" label="Date" icon={<Calendar className="size-4" />}>
+                  <Field id="date" label="사용일자" icon={<Calendar className="size-4" />}>
                     <Input
                       id="date"
                       type="date"
@@ -458,45 +462,45 @@ export function EmployeeDashboard() {
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field id="amount" label="Amount" icon={<DollarSign className="size-4" />}>
+                  <Field id="amount" label="금액 (원)" icon={<Wallet2 className="size-4" />}>
                     <Input
                       id="amount"
-                      inputMode="decimal"
+                      inputMode="numeric"
                       value={form.amount}
                       onChange={(e) => update("amount", e.target.value)}
-                      placeholder="0.00"
+                      placeholder="0"
                     />
                   </Field>
-                  <Field id="item" label="Item name" icon={<Tag className="size-4" />}>
+                  <Field id="item" label="품목명" icon={<Tag className="size-4" />}>
                     <Input
                       id="item"
                       value={form.item}
                       onChange={(e) => update("item", e.target.value)}
-                      placeholder="Awaiting scan…"
+                      placeholder="인식 대기 중…"
                     />
                   </Field>
                 </div>
 
                 <Field
                   id="employeeName"
-                  label="Submitted by"
+                  label="제출자"
                   icon={<User className="size-4" />}
                 >
                   <Input
                     id="employeeName"
                     value={form.employeeName}
                     onChange={(e) => update("employeeName", e.target.value)}
-                    placeholder="Awaiting scan…"
+                    placeholder="인식 대기 중…"
                   />
                 </Field>
 
-                <Field id="purpose" label="Purpose" icon={<FileText className="size-4" />}>
+                <Field id="purpose" label="사용 목적" icon={<FileText className="size-4" />}>
                   <Textarea
                     id="purpose"
                     rows={3}
                     value={form.purpose}
                     onChange={(e) => update("purpose", e.target.value)}
-                    placeholder="Awaiting scan…"
+                    placeholder="인식 대기 중…"
                     className="resize-none"
                   />
                 </Field>
@@ -513,8 +517,7 @@ export function EmployeeDashboard() {
                       className="mt-0.5"
                     />
                     <span>
-                      I confirm that the details above are accurate and match the uploaded
-                      receipt.
+                      위 내용이 정확하며 업로드한 영수증과 일치함을 확인합니다.
                     </span>
                   </label>
                   <Button
@@ -523,7 +526,7 @@ export function EmployeeDashboard() {
                     className="shrink-0 gap-1.5"
                   >
                     {stage === "submitting" && <Loader2 className="size-4 animate-spin" />}
-                    {stage === "submitting" ? "Submitting…" : "Submit for Approval"}
+                    {stage === "submitting" ? "제출 중…" : "결재 요청하기"}
                   </Button>
                 </div>
               </fieldset>
@@ -537,14 +540,14 @@ export function EmployeeDashboard() {
 
 function messageFor(error: unknown): string {
   if (error instanceof ReceiptApiError) return error.message
-  return "Something went wrong while analyzing the receipt. Please try again."
+  return "영수증을 분석하는 중 문제가 발생했습니다. 다시 시도해 주세요."
 }
 
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso)
   if (Number.isNaN(parsed.getTime())) return iso
-  return parsed.toLocaleString("en-US", {
-    month: "short",
+  return parsed.toLocaleString("ko-KR", {
+    month: "long",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
@@ -594,7 +597,7 @@ function ComplianceBanner({
       </div>
       <span className="ml-auto hidden shrink-0 items-center gap-1 self-center rounded-full bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
         <Sparkles className="size-2.5" />
-        AI policy check
+        AI 규정 검토
       </span>
     </div>
   )

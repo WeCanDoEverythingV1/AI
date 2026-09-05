@@ -10,9 +10,9 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Ledgerly — AI Receipt Approval & SaaS Spend Control',
+  title: '바로 — AI 영수증 결재 & SaaS 지출 관리',
   description:
-    'AI-powered receipt approval and subscription management for modern finance teams.',
+    'AI가 영수증 결재와 SaaS 구독 지출을 대신 정리해 주는 재무 자동화 서비스.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -48,7 +48,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="ko"
       className={`light bg-background ${geistSans.variable} ${geistMono.variable}`}
     >
       <body className="font-sans antialiased">

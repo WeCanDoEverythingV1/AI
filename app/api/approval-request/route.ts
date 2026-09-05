@@ -15,43 +15,43 @@ export async function POST(request: Request) {
     formData = await request.formData()
   } catch {
     return NextResponse.json(
-      { message: "Expected a multipart/form-data body." },
+      { message: "multipart/form-data 형식의 본문이 필요합니다." },
       { status: 400 },
     )
   }
 
   const file = formData.get("file")
   if (!(file instanceof File)) {
-    return NextResponse.json({ message: "Missing `file` field." }, { status: 400 })
+    return NextResponse.json({ message: "`file` 항목이 없습니다." }, { status: 400 })
   }
   if (file.size > MAX_FILE_BYTES) {
-    return NextResponse.json({ message: "That file is too large." }, { status: 413 })
+    return NextResponse.json({ message: "파일 크기가 너무 큽니다." }, { status: 413 })
   }
 
   // Stand in for OCR latency so the loading state is actually exercised.
   await new Promise((resolve) => setTimeout(resolve, 1800))
 
   const employeeName =
-    (formData.get("employeeName") as string | null)?.trim() || "Sarah Chen"
+    (formData.get("employeeName") as string | null)?.trim() || "김대리"
 
   return NextResponse.json({
     id: `REQ-${Math.floor(2100 + Math.random() * 800)}`,
-    amount: 48.5,
-    currency: "USD",
-    merchant: "Blue Bottle Coffee",
+    amount: 48500,
+    currency: "KRW",
+    merchant: "블루보틀 삼청",
     employeeName,
-    purpose: "Client onboarding kickoff with the Acme account team.",
+    purpose: "에이콘 계정팀과 진행한 고객 온보딩 킥오프 미팅.",
     status: "draft",
     createdAt: new Date().toISOString(),
     date: "2026-08-14",
-    item: "Team offsite coffee (6 drinks)",
-    category: "Meals",
+    item: "팀 오프사이트 커피 (6잔)",
+    category: "식비",
     confidence: 0.94,
     compliance: {
       level: "compliant",
-      title: "Compliant: Within meal allowance",
+      title: "규정 준수: 식대 한도 이내",
       detail:
-        "$48.50 is under the $75/person meal cap and the category matches the client-onboarding budget.",
+        "48,500원은 1인 식대 한도 75,000원 이내이며, 분류도 고객 온보딩 예산과 일치합니다.",
     },
   })
 }

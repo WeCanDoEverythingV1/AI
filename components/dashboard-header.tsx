@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { Role } from "@/lib/mock-data"
+import { initialsOf, roleLabels, type Role } from "@/lib/mock-data"
 import { LogOut, ReceiptText } from "lucide-react"
 
 export type ApproverView = "approvals" | "spend"
@@ -27,7 +27,7 @@ export function DashboardHeader({
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <ReceiptText className="size-4.5" />
           </div>
-          <span className="text-sm font-semibold tracking-tight">Ledgerly</span>
+          <span className="text-sm font-semibold tracking-tight">바로</span>
         </div>
 
         {role === "approver" && onNavigate && (
@@ -36,10 +36,10 @@ export function DashboardHeader({
               active={activeView === "approvals"}
               onClick={() => onNavigate("approvals")}
             >
-              Approvals
+              결재 요청
             </NavItem>
             <NavItem active={activeView === "spend"} onClick={() => onNavigate("spend")}>
-              Spend Insights
+              지출 인사이트
             </NavItem>
           </nav>
         )}
@@ -47,19 +47,16 @@ export function DashboardHeader({
         <div className="ml-auto flex items-center gap-3">
           <div className="hidden text-right sm:block">
             <p className="text-xs font-medium leading-tight text-foreground">{userName}</p>
-            <p className="text-[11px] capitalize leading-tight text-muted-foreground">
-              {role}
+            <p className="text-[11px] leading-tight text-muted-foreground">
+              {roleLabels[role]}
             </p>
           </div>
           <div className="flex size-8 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
-            {userName
-              .split(" ")
-              .map((n) => n[0])
-              .join("")}
+            {initialsOf(userName)}
           </div>
           <Button variant="ghost" size="sm" onClick={onSignOut} className="gap-1.5">
             <LogOut className="size-4" />
-            <span className="hidden sm:inline">Switch</span>
+            <span className="hidden sm:inline">역할 전환</span>
           </Button>
         </div>
       </div>
@@ -67,10 +64,10 @@ export function DashboardHeader({
       {role === "approver" && onNavigate && (
         <nav className="flex items-center gap-1 border-t border-border px-4 py-2 sm:hidden">
           <NavItem active={activeView === "approvals"} onClick={() => onNavigate("approvals")}>
-            Approvals
+            결재 요청
           </NavItem>
           <NavItem active={activeView === "spend"} onClick={() => onNavigate("spend")}>
-            Spend Insights
+            지출 인사이트
           </NavItem>
         </nav>
       )}

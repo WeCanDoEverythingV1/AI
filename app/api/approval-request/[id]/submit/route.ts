@@ -16,18 +16,18 @@ export async function POST(
   try {
     body = (await request.json()) as Record<string, unknown>
   } catch {
-    return NextResponse.json({ message: "Expected a JSON body." }, { status: 400 })
+    return NextResponse.json({ message: "JSON 형식의 본문이 필요합니다." }, { status: 400 })
   }
 
   const amount = Number(body.amount)
   if (!Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json(
-      { message: "`amount` must be a positive number." },
+      { message: "`amount`는 0보다 큰 숫자여야 합니다." },
       { status: 422 },
     )
   }
   if (typeof body.merchant !== "string" || !body.merchant.trim()) {
-    return NextResponse.json({ message: "`merchant` is required." }, { status: 422 })
+    return NextResponse.json({ message: "`merchant`는 필수 항목입니다." }, { status: 422 })
   }
 
   await new Promise((resolve) => setTimeout(resolve, 700))
