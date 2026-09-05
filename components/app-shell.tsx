@@ -7,6 +7,7 @@ import { DashboardHeader, type ApproverView } from "@/components/dashboard-heade
 import { EmployeeDashboard } from "@/components/employee-dashboard"
 import { ApproverDashboard } from "@/components/approver-dashboard"
 import { SubscriptionAlert } from "@/components/subscription-alert"
+import { PolicyConsole } from "@/components/policy-console"
 
 const names: Record<Role, string> = {
   employee: "김대리",
@@ -33,9 +34,10 @@ export function AppShell() {
           setApproverView("approvals")
         }}
       />
-      {role === "employee" && <EmployeeDashboard />}
+      {role === "employee" && <EmployeeDashboard employeeName={names[role]} />}
       {role === "approver" && approverView === "approvals" && <ApproverDashboard />}
       {role === "approver" && approverView === "spend" && <SubscriptionAlert />}
+      {role === "approver" && approverView === "policy" && <PolicyConsole />}
     </div>
   )
 }

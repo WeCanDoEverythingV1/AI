@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { initialsOf, roleLabels, type Role } from "@/lib/mock-data"
 import { LogOut, ReceiptText } from "lucide-react"
 
-export type ApproverView = "approvals" | "spend"
+export type ApproverView = "approvals" | "spend" | "policy"
 
 export function DashboardHeader({
   role,
@@ -41,6 +41,9 @@ export function DashboardHeader({
             <NavItem active={activeView === "spend"} onClick={() => onNavigate("spend")}>
               지출 인사이트
             </NavItem>
+            <NavItem active={activeView === "policy"} onClick={() => onNavigate("policy")}>
+              규정 관리
+            </NavItem>
           </nav>
         )}
 
@@ -64,10 +67,13 @@ export function DashboardHeader({
       {role === "approver" && onNavigate && (
         <nav className="flex items-center gap-1 border-t border-border px-4 py-2 sm:hidden">
           <NavItem active={activeView === "approvals"} onClick={() => onNavigate("approvals")}>
-            결재 요청
+            결재 허가
           </NavItem>
           <NavItem active={activeView === "spend"} onClick={() => onNavigate("spend")}>
             지출 인사이트
+          </NavItem>
+          <NavItem active={activeView === "policy"} onClick={() => onNavigate("policy")}>
+            규정 관리
           </NavItem>
         </nav>
       )}

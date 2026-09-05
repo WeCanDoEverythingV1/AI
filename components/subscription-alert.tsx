@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,11 +14,18 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import {
-  buildVendorEmail,
+  companySubscriptions,
   currency,
-  wastedSubscriptions,
-  type WastedSubscription,
+  type CompanySubscription,
 } from "@/lib/mock-data"
+import {
+  analyzeSubscriptions,
+  draftVendorEmail,
+  isAbort,
+  messageFor,
+} from "@/lib/api/endpoints"
+import { severityLabels, toSeverity, type Severity } from "@/lib/policy"
+import type { EmailDraftDto, SubscriptionAnalysisDto } from "@/types/api"
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -28,45 +35,68 @@ import {
   Loader2,
   Sparkles,
   TrendingDown,
+  TriangleAlert,
   Wand2,
 } from "lucide-react"
 
 type Stage = "idle" | "scanning" | "revealed"
 
-const severityStyles: Record<string, string> = {
+const severityStyles: Record<Severity, string> = {
   high: "bg-destructive/10 text-destructive",
   medium: "bg-warning/15 text-warning-foreground",
   low: "bg-muted text-muted-foreground",
 }
 
-const severityLabels: Record<string, string> = {
-  high: "높음",
-  medium: "보통",
-  low: "낮음",
-}
-
 /** Won amounts run to seven digits, so the axis reads in 만 원 units. */
-const compactWon = (value: number) => `${Math.round(value / 10000).toLocaleString("ko-KR")}만`
+const compactWon = (value: number) =>
+  `${Math.round(value / 10000).toLocaleString("ko-KR")}만`
+
+/** An analysis row joined to the subscription it came from. */
+type Insight = { sub: CompanySubscription; analysis: SubscriptionAnalysisDto }
 
 export function SubscriptionAlert() {
   const [stage, setStage] = useState<Stage>("idle")
-  const [selected, setSelected] = useState<WastedSubscription | null>(null)
+  const [insights, setInsights] = useState<Insight[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Insight | null>(null)
 
-  const totalWaste = wastedSubscriptions.reduce((sum, s) => {
-    const idle = s.seats - s.activeSeats
-    return sum + (s.monthlyCost / s.seats) * idle
-  }, 0)
-
-  const chartData = wastedSubscriptions.map((s) => ({
-    name: s.name.split(" ")[0],
-    waste: Math.round((s.monthlyCost / s.seats) * (s.seats - s.activeSeats)),
-    severity: s.severity,
-  }))
-
-  const runScan = () => {
+  const runScan = async () => {
     setStage("scanning")
-    window.setTimeout(() => setStage("revealed"), 1600)
+    setError(null)
+    try {
+      const results = await analyzeSubscriptions(companySubscriptions)
+      const bySubId = new Map(companySubscriptions.map((s) => [s.id, s]))
+      setInsights(
+        results
+          .map((analysis) => {
+            const sub = bySubId.get(analysis.id)
+            return sub ? { sub, analysis } : null
+          })
+          .filter((row): row is Insight => row !== null)
+          .sort((a, b) => b.analysis.monthlyWaste - a.analysis.monthlyWaste),
+      )
+      setStage("revealed")
+    } catch (caught) {
+      setError(messageFor(caught, "지출 분석에 실패했습니다. 다시 시도해 주세요."))
+      // Keep any previous results on screen rather than blanking the page.
+      setStage(insights.length > 0 ? "revealed" : "idle")
+    }
   }
+
+  const totalWaste = useMemo(
+    () => insights.reduce((sum, i) => sum + i.analysis.monthlyWaste, 0),
+    [insights],
+  )
+
+  const chartData = useMemo(
+    () =>
+      insights.map((i) => ({
+        name: i.sub.name.split(" ")[0],
+        waste: Math.round(i.analysis.monthlyWaste),
+        severity: toSeverity(i.analysis.severity),
+      })),
+    [insights],
+  )
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -89,12 +119,13 @@ export function SubscriptionAlert() {
               낭비되는 구독료 찾기
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              분석을 실행하면 미사용 좌석, 중복 도구, 해지 대상을 한 번에 찾아 줍니다.
+              구독 {companySubscriptions.length}건을 AI로 분석해 미사용 좌석, 중복 도구,
+              해지 대상을 찾아냅니다.
             </p>
           </div>
           <Button
             size="lg"
-            onClick={runScan}
+            onClick={() => void runScan()}
             disabled={stage === "scanning"}
             className="gap-2 shadow-lg shadow-primary/25"
           >
@@ -117,14 +148,22 @@ export function SubscriptionAlert() {
         />
       </div>
 
-      {/* Results */}
-      {stage === "revealed" && (
+      {error && (
+        <div
+          role="alert"
+          className="mt-4 flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+        >
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <p className="text-xs leading-relaxed text-destructive">{error}</p>
+        </div>
+      )}
+
+      {stage === "revealed" && insights.length > 0 && (
         <div className="mt-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
           <div className="mb-6 grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 sm:col-span-1">
               <div className="flex items-center gap-2 text-xs font-medium text-destructive">
-                <AlertTriangle className="size-4" />
-                월 예상 낭비액
+                <AlertTriangle className="size-4" />월 예상 낭비액
               </div>
               <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
                 {currency(totalWaste)}
@@ -141,7 +180,10 @@ export function SubscriptionAlert() {
               </p>
               <div className="h-32">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                  <BarChart
+                    data={chartData}
+                    margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+                  >
                     <XAxis
                       dataKey="name"
                       tickLine={false}
@@ -185,12 +227,11 @@ export function SubscriptionAlert() {
           </div>
 
           <h3 className="mb-3 text-sm font-medium text-foreground">
-            추천 조치 ({wastedSubscriptions.length}건)
+            AI 추천 조치 ({insights.length}건)
           </h3>
           <ul className="space-y-2.5">
-            {wastedSubscriptions.map((sub) => {
-              const idle = sub.seats - sub.activeSeats
-              const waste = Math.round((sub.monthlyCost / sub.seats) * idle)
+            {insights.map(({ sub, analysis }) => {
+              const severity = toSeverity(analysis.severity)
               return (
                 <li
                   key={sub.id}
@@ -205,27 +246,31 @@ export function SubscriptionAlert() {
                         <p className="truncate text-sm font-medium text-foreground">
                           {sub.name}
                         </p>
-                        <Badge
-                          className={cn("font-medium", severityStyles[sub.severity])}
-                        >
-                          {severityLabels[sub.severity]}
+                        <Badge className={cn("font-medium", severityStyles[severity])}>
+                          {severityLabels[severity]}
                         </Badge>
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        좌석 {sub.activeSeats}/{sub.seats} 사용 중 · 마지막 사용{" "}
-                        {sub.lastUsed}
+                        좌석 {sub.activeSeats}/{sub.seats} 사용 중 · 유휴{" "}
+                        {analysis.idleSeats}석 · 마지막 사용 {sub.lastUsed}
                       </p>
+                      {analysis.recommendation && (
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">
+                          {analysis.recommendation}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between gap-4 sm:justify-end">
                     <div className="flex items-center gap-1.5 rounded-lg bg-destructive/5 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-destructive">
-                      <ArrowDownRight className="size-4" />월 {currency(waste)}
+                      <ArrowDownRight className="size-4" />월{" "}
+                      {currency(analysis.monthlyWaste)}
                     </div>
                     <Button
                       variant={sub.action === "cancel" ? "outline" : "secondary"}
                       size="sm"
-                      onClick={() => setSelected(sub)}
+                      onClick={() => setSelected({ sub, analysis })}
                       className={cn(
                         "shrink-0 gap-1.5",
                         sub.action === "cancel" &&
@@ -243,36 +288,80 @@ export function SubscriptionAlert() {
         </div>
       )}
 
-      {stage === "idle" && (
+      {stage !== "revealed" && (
         <div className="mt-6 flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 py-16 text-center">
           <div className="flex size-12 items-center justify-center rounded-full bg-accent">
-            <Wand2 className="size-6 text-primary" />
+            {stage === "scanning" ? (
+              <Loader2 className="size-6 animate-spin text-primary" />
+            ) : (
+              <Wand2 className="size-6 text-primary" />
+            )}
           </div>
-          <p className="mt-4 text-sm font-medium text-foreground">아직 분석 결과가 없습니다</p>
+          <p className="mt-4 text-sm font-medium text-foreground">
+            {stage === "scanning" ? "AI가 구독을 분석하고 있습니다…" : "아직 분석 결과가 없습니다"}
+          </p>
           <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-            위의 버튼을 눌러 낭비되는 구독료와 절감 방안을 확인하세요.
+            {stage === "scanning"
+              ? "서버가 절전 상태였다면 조금 더 걸릴 수 있습니다."
+              : "위의 버튼을 눌러 낭비되는 구독료와 절감 방안을 확인하세요."}
           </p>
         </div>
       )}
 
       <EmailDraftDialog
-        sub={selected}
+        insight={selected}
         onOpenChange={(open) => !open && setSelected(null)}
       />
     </main>
   )
 }
 
+/* ------------------------------------------------------------------ *
+ * Vendor email draft
+ * ------------------------------------------------------------------ */
+
 function EmailDraftDialog({
-  sub,
+  insight,
   onOpenChange,
 }: {
-  sub: WastedSubscription | null
+  insight: Insight | null
   onOpenChange: (open: boolean) => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [email, setEmail] = useState<EmailDraftDto | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const email = sub ? buildVendorEmail(sub) : null
+  const sub = insight?.sub ?? null
+  const subId = sub?.id ?? null
+
+  // Draft on open, and again whenever the dialog switches subscription. Keyed on
+  // the id rather than the object so a re-render alone never refetches.
+  useEffect(() => {
+    if (!sub || !subId) return
+
+    const controller = new AbortController()
+    setEmail(null)
+    setError(null)
+    setLoading(true)
+
+    draftVendorEmail(sub, sub.action, { language: "ko", signal: controller.signal })
+      .then((draft) => {
+        if (!controller.signal.aborted) setEmail(draft)
+      })
+      .catch((caught) => {
+        if (controller.signal.aborted || isAbort(caught)) return
+        setError(messageFor(caught, "메일 초안을 생성하지 못했습니다."))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+
+    return () => controller.abort()
+    // `sub` is derived from `subId`; re-running on the object would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subId])
+
   const fullText = email ? `제목: ${email.subject}\n\n${email.body}` : ""
 
   const copy = async () => {
@@ -289,7 +378,9 @@ function EmailDraftDialog({
     <Dialog
       open={sub !== null}
       onOpenChange={(open) => {
-        if (!open) setCopied(false)
+        if (!open) {
+          setCopied(false)
+        }
         onOpenChange(open)
       }}
     >
@@ -307,8 +398,20 @@ function EmailDraftDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {email && (
-          <div className="max-h-[50vh] overflow-y-auto p-5">
+        <div className="max-h-[50vh] overflow-y-auto p-5">
+          {loading ? (
+            <div className="flex flex-col items-center py-10 text-center">
+              <Loader2 className="size-6 animate-spin text-primary" />
+              <p className="mt-3 text-sm text-muted-foreground">
+                AI가 메일 초안을 작성하고 있습니다…
+              </p>
+            </div>
+          ) : error ? (
+            <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <p className="text-xs leading-relaxed text-destructive">{error}</p>
+            </div>
+          ) : email ? (
             <div className="rounded-lg border border-border bg-secondary/50 p-4">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 제목
@@ -319,12 +422,12 @@ function EmailDraftDialog({
                 {email.body}
               </p>
             </div>
-          </div>
-        )}
+          ) : null}
+        </div>
 
         <DialogFooter className="flex-row items-center justify-between gap-3 border-t border-border p-5">
           <p className="text-xs text-muted-foreground">바로 AI가 작성 · 수정 가능</p>
-          <Button onClick={copy} className="gap-1.5">
+          <Button onClick={copy} disabled={!email} className="gap-1.5">
             {copied ? (
               <>
                 <Check className="size-4" />

@@ -7,19 +7,34 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field } from "@/components/field"
 import { cn } from "@/lib/utils"
-import type { RiskLevel } from "@/lib/mock-data"
+import { currency } from "@/lib/mock-data"
 import {
-  analyzeReceipt,
-  submitApprovalRequest,
+  createApprovalRequest,
+  isAbort,
+  messageFor,
+  scanReceipt,
   validateReceiptFile,
-  ReceiptApiError,
-  type ReceiptAnalysis,
-  type ReceiptStatus,
-} from "@/lib/receipt-api"
+} from "@/lib/api/endpoints"
+import {
+  categoryLabels,
+  deriveRisk,
+  expenseCategories,
+  statusLabels,
+  toExpenseCategory,
+  type RiskLevel,
+} from "@/lib/policy"
+import type {
+  ApprovalRequestCreateDto,
+  ApprovalRequestResponseDto,
+  ExpenseCategory,
+  ReceiptScanResultDto,
+} from "@/types/api"
 import {
   Calendar,
   CheckCircle2,
+  Copy,
   FileText,
+  Layers,
   Loader2,
   RotateCcw,
   ShieldCheck,
@@ -36,47 +51,45 @@ type FormState = {
   merchant: string
   date: string
   amount: string
-  item: string
+  itemName: string
   purpose: string
   employeeName: string
+  expenseCategory: ExpenseCategory
 }
 
 const emptyForm: FormState = {
   merchant: "",
   date: "",
   amount: "",
-  item: "",
+  itemName: "",
   purpose: "",
   employeeName: "",
+  expenseCategory: "OTHER",
 }
 
-const statusLabels: Record<ReceiptStatus, string> = {
-  draft: "작성 중",
-  pending: "결재 대기",
-  approved: "승인 완료",
-  rejected: "반려됨",
-}
-
-/** Prefill the editable form from the analysis so the user can correct it. */
-function toFormState(analysis: ReceiptAnalysis): FormState {
+/** Prefill the editable form from the scan so the user can correct it. */
+function toFormState(scan: ReceiptScanResultDto, employeeName: string): FormState {
   return {
-    merchant: analysis.merchant,
-    date: analysis.date ?? "",
-    amount: String(analysis.amount),
-    item: analysis.item ?? "",
-    purpose: analysis.purpose,
-    employeeName: analysis.employeeName,
+    merchant: scan.merchant ?? "",
+    date: scan.date ?? "",
+    amount: scan.amount != null ? String(scan.amount) : "",
+    itemName: scan.itemName ?? "",
+    purpose: scan.purpose ?? "",
+    // The scan has no employee field — it is whoever is signed in.
+    employeeName,
+    expenseCategory: toExpenseCategory(scan.category),
   }
 }
 
-type Stage = "idle" | "analyzing" | "ready" | "submitting" | "submitted"
+type Stage = "idle" | "scanning" | "ready" | "submitting" | "submitted"
 
-export function EmployeeDashboard() {
+export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
   const [stage, setStage] = useState<Stage>("idle")
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [analysis, setAnalysis] = useState<ReceiptAnalysis | null>(null)
+  const [scan, setScan] = useState<ReceiptScanResultDto | null>(null)
+  const [submitted, setSubmitted] = useState<ApprovalRequestResponseDto | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [confirmed, setConfirmed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -100,35 +113,36 @@ export function EmployeeDashboard() {
       return null
     })
 
-  /* 3–5. Upload the file, show the loading state, handle failures. */
-  const runAnalysis = async (nextFile: File) => {
+  /** Upload the file, show the loading state, handle failures. */
+  const runScan = async (nextFile: File) => {
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
 
-    setStage("analyzing")
+    setStage("scanning")
     setError(null)
-    setAnalysis(null)
+    setScan(null)
+    setSubmitted(null)
     setForm(emptyForm)
     setConfirmed(false)
 
     try {
-      const result = await analyzeReceipt(nextFile, { signal: controller.signal })
+      const result = await scanReceipt(nextFile, { signal: controller.signal })
       if (controller.signal.aborted) return
 
-      setAnalysis(result)
-      setForm(toFormState(result))
+      setScan(result)
+      setForm(toFormState(result, employeeName))
       setStage("ready")
     } catch (caught) {
-      if (controller.signal.aborted) return
-      setError(messageFor(caught))
+      if (controller.signal.aborted || isAbort(caught)) return
+      setError(messageFor(caught, "영수증을 분석하지 못했습니다. 다시 시도해 주세요."))
       setStage("idle")
     } finally {
       if (requestRef.current === controller) requestRef.current = null
     }
   }
 
-  /* 2. File selection — shared by the file input and the drop zone. */
+  /** File selection — shared by the file input and the drop zone. */
   const handleFiles = (files: FileList | null) => {
     const picked = files?.[0]
     if (!picked) return
@@ -141,10 +155,10 @@ export function EmployeeDashboard() {
 
     setFile(picked)
     showPreview(picked)
-    void runAnalysis(picked)
+    void runScan(picked)
   }
 
-  const update = (key: keyof FormState, value: string) =>
+  const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((previous) => ({ ...previous, [key]: value }))
 
   const reset = () => {
@@ -153,17 +167,18 @@ export function EmployeeDashboard() {
     clearPreview()
     setStage("idle")
     setFile(null)
-    setAnalysis(null)
+    setScan(null)
+    setSubmitted(null)
     setForm(emptyForm)
     setConfirmed(false)
     setError(null)
     if (inputRef.current) inputRef.current.value = ""
   }
 
-  /* 6. Send the fields the user verified/corrected for approval. */
+  /** Send the fields the user verified/corrected as a real approval request. */
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!analysis) return
+    if (stage !== "ready") return
 
     const amount = Number(form.amount)
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -174,6 +189,24 @@ export function EmployeeDashboard() {
       setError("제출하기 전에 가맹점을 입력해 주세요.")
       return
     }
+    if (!form.date) {
+      setError("사용일자를 선택해 주세요.")
+      return
+    }
+    if (!form.employeeName.trim()) {
+      setError("제출자 이름을 입력해 주세요.")
+      return
+    }
+
+    const body: ApprovalRequestCreateDto = {
+      employeeName: form.employeeName.trim(),
+      merchant: form.merchant.trim(),
+      date: form.date,
+      amount,
+      itemName: form.itemName.trim() || form.merchant.trim(),
+      purpose: form.purpose.trim() || "제출자가 목적을 입력하지 않았습니다.",
+      expenseCategory: form.expenseCategory,
+    }
 
     const controller = new AbortController()
     requestRef.current = controller
@@ -181,33 +214,26 @@ export function EmployeeDashboard() {
     setError(null)
 
     try {
-      const submitted = await submitApprovalRequest(
-        analysis.id,
-        {
-          merchant: form.merchant.trim(),
-          date: form.date,
-          amount,
-          item: form.item.trim(),
-          purpose: form.purpose.trim(),
-          employeeName: form.employeeName.trim(),
-        },
-        { signal: controller.signal },
-      )
+      const created = await createApprovalRequest(body, { signal: controller.signal })
       if (controller.signal.aborted) return
 
-      setAnalysis(submitted)
+      setSubmitted(created)
       setStage("submitted")
     } catch (caught) {
-      if (controller.signal.aborted) return
-      setError(messageFor(caught))
+      if (controller.signal.aborted || isAbort(caught)) return
+      setError(messageFor(caught, "결재 요청을 등록하지 못했습니다."))
       setStage("ready")
     } finally {
       if (requestRef.current === controller) requestRef.current = null
     }
   }
 
-  const busy = stage === "analyzing"
-  const lowConfidence = analysis?.confidence !== undefined && analysis.confidence < 0.8
+  const busy = stage === "scanning"
+  const parsedAmount = Number(form.amount)
+  const risk =
+    Number.isFinite(parsedAmount) && parsedAmount > 0
+      ? deriveRisk(parsedAmount, form.expenseCategory)
+      : null
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -262,7 +288,7 @@ export function EmployeeDashboard() {
               className="sr-only"
               onChange={(e) => handleFiles(e.target.files)}
             />
-            {stage === "analyzing" ? (
+            {stage === "scanning" ? (
               <>
                 <div className="flex size-14 items-center justify-center rounded-full bg-accent">
                   <Loader2 className="size-6 animate-spin text-primary" />
@@ -271,7 +297,8 @@ export function EmployeeDashboard() {
                   영수증을 읽는 중…
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  가맹점, 금액, 품목을 추출하고 있어요 — 몇 초 정도 걸릴 수 있습니다
+                  가맹점, 금액, 품목을 추출하고 있어요 — 서버가 절전 상태였다면 1분 넘게
+                  걸릴 수 있습니다
                 </p>
               </>
             ) : file ? (
@@ -291,19 +318,19 @@ export function EmployeeDashboard() {
                   {file.name}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {analysis
+                  {scan
                     ? "인식 완료 — 오른쪽에서 초안을 확인하세요"
                     : "인식 실패 — 아래에서 다시 시도해 주세요"}
                 </p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  {!analysis && (
+                  {!scan && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="gap-1.5"
                       onClick={(e) => {
                         e.stopPropagation()
-                        void runAnalysis(file)
+                        void runScan(file)
                       }}
                     >
                       <RotateCcw className="size-3.5" />
@@ -356,13 +383,13 @@ export function EmployeeDashboard() {
           </div>
         </section>
 
-        {/* AI form */}
+        {/* Draft form */}
         <section aria-labelledby="form-heading">
           <div className="mb-3 flex items-center justify-between">
             <h2 id="form-heading" className="text-sm font-medium text-foreground">
               결재 요청서
             </h2>
-            {analysis && stage !== "submitted" && (
+            {scan && stage !== "submitted" && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-foreground">
                 <Sparkles className="size-3" />
                 AI 자동 입력
@@ -374,7 +401,7 @@ export function EmployeeDashboard() {
             onSubmit={handleSubmit}
             className="rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6"
           >
-            {stage === "submitted" ? (
+            {stage === "submitted" && submitted ? (
               <div className="flex flex-col items-center py-10 text-center">
                 <div className="flex size-14 items-center justify-center rounded-full bg-success/10">
                   <CheckCircle2 className="size-7 text-success" />
@@ -383,13 +410,12 @@ export function EmployeeDashboard() {
                   결재 요청이 접수되었습니다
                 </p>
                 <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-                  {form.merchant || "이 영수증"} 건이 결재자에게 전달되었습니다.
+                  {submitted.merchant} · {currency(submitted.amount)} 건이 결재자에게
+                  전달되었습니다.
                 </p>
-                {analysis && (
-                  <p className="mt-2 font-mono text-xs text-muted-foreground">
-                    {analysis.id} · {statusLabels[analysis.status]}
-                  </p>
-                )}
+                <p className="mt-2 font-mono text-xs text-muted-foreground">
+                  REQ-{submitted.id} · {statusLabels[submitted.status]}
+                </p>
                 <Button variant="outline" size="sm" className="mt-5" onClick={reset}>
                   다른 영수증 제출하기
                 </Button>
@@ -402,38 +428,26 @@ export function EmployeeDashboard() {
                   stage !== "ready" && "opacity-55",
                 )}
               >
-                {analysis && (
+                {scan && (
                   <>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                      <span className="font-mono">{analysis.id}</span>
-                      <span aria-hidden>·</span>
-                      <span>{formatTimestamp(analysis.createdAt)} 인식</span>
-                      {analysis.category && (
+                      <span>AI 인식 결과</span>
+                      {scan.category && (
                         <>
                           <span aria-hidden>·</span>
-                          <span>{analysis.category}</span>
+                          <span>원본 분류 “{scan.category}”</span>
                         </>
                       )}
-                      {analysis.confidence !== undefined && (
+                      {risk && (
                         <>
                           <span aria-hidden>·</span>
-                          <span>신뢰도 {Math.round(analysis.confidence * 100)}%</span>
+                          <span>{risk.label}</span>
                         </>
                       )}
                     </div>
 
-                    {analysis.compliance && (
-                      <ComplianceBanner
-                        level={analysis.compliance.level}
-                        title={analysis.compliance.title}
-                        detail={analysis.compliance.detail}
-                      />
-                    )}
-
-                    {lowConfidence && (
-                      <p className="text-xs leading-relaxed text-warning-foreground">
-                        인식 정확도가 낮습니다 — 제출 전에 모든 항목을 다시 확인해 주세요.
-                      </p>
+                    {scan.possibleDuplicate && (
+                      <DuplicateBanner note={scan.duplicateNote} />
                     )}
                   </>
                 )}
@@ -471,28 +485,46 @@ export function EmployeeDashboard() {
                       placeholder="0"
                     />
                   </Field>
-                  <Field id="item" label="품목명" icon={<Tag className="size-4" />}>
-                    <Input
-                      id="item"
-                      value={form.item}
-                      onChange={(e) => update("item", e.target.value)}
-                      placeholder="인식 대기 중…"
-                    />
+                  <Field id="category" label="지출 분류" icon={<Layers className="size-4" />}>
+                    <select
+                      id="category"
+                      value={form.expenseCategory}
+                      onChange={(e) =>
+                        update("expenseCategory", e.target.value as ExpenseCategory)
+                      }
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-100"
+                    >
+                      {expenseCategories.map((c) => (
+                        <option key={c} value={c}>
+                          {categoryLabels[c]}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                 </div>
 
-                <Field
-                  id="employeeName"
-                  label="제출자"
-                  icon={<User className="size-4" />}
-                >
-                  <Input
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field id="itemName" label="품목명" icon={<Tag className="size-4" />}>
+                    <Input
+                      id="itemName"
+                      value={form.itemName}
+                      onChange={(e) => update("itemName", e.target.value)}
+                      placeholder="인식 대기 중…"
+                    />
+                  </Field>
+                  <Field
                     id="employeeName"
-                    value={form.employeeName}
-                    onChange={(e) => update("employeeName", e.target.value)}
-                    placeholder="인식 대기 중…"
-                  />
-                </Field>
+                    label="제출자"
+                    icon={<User className="size-4" />}
+                  >
+                    <Input
+                      id="employeeName"
+                      value={form.employeeName}
+                      onChange={(e) => update("employeeName", e.target.value)}
+                      placeholder="이름"
+                    />
+                  </Field>
+                </div>
 
                 <Field id="purpose" label="사용 목적" icon={<FileText className="size-4" />}>
                   <Textarea
@@ -504,6 +536,8 @@ export function EmployeeDashboard() {
                     className="resize-none"
                   />
                 </Field>
+
+                {risk && <PolicyNote level={risk.level} label={risk.label} />}
 
                 <div className="flex flex-col gap-4 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <label
@@ -538,67 +572,58 @@ export function EmployeeDashboard() {
   )
 }
 
-function messageFor(error: unknown): string {
-  if (error instanceof ReceiptApiError) return error.message
-  return "영수증을 분석하는 중 문제가 발생했습니다. 다시 시도해 주세요."
+/** The one compliance signal the scan endpoint actually returns. */
+function DuplicateBanner({ note }: { note: string }) {
+  return (
+    <div
+      role="status"
+      className="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/12 p-3"
+    >
+      <Copy className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-warning-foreground">중복 제출 의심</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+          {note || "이미 제출된 영수증과 비슷합니다. 제출 전에 확인해 주세요."}
+        </p>
+      </div>
+      <span className="ml-auto hidden shrink-0 items-center gap-1 self-center rounded-full bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
+        <Sparkles className="size-2.5" />
+        AI 중복 검사
+      </span>
+    </div>
+  )
 }
 
-function formatTimestamp(iso: string): string {
-  const parsed = new Date(iso)
-  if (Number.isNaN(parsed.getTime())) return iso
-  return parsed.toLocaleString("ko-KR", {
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })
-}
-
-const complianceStyles: Record<
-  RiskLevel,
-  { wrap: string; title: string; icon: React.ReactNode }
-> = {
+const policyStyles: Record<RiskLevel, { wrap: string; text: string; icon: React.ReactNode }> = {
   compliant: {
     wrap: "border-success/25 bg-success/8",
-    title: "text-success",
+    text: "text-success",
     icon: <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" />,
   },
   warning: {
     wrap: "border-warning/40 bg-warning/12",
-    title: "text-warning-foreground",
+    text: "text-warning-foreground",
     icon: <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />,
   },
   high: {
     wrap: "border-destructive/30 bg-destructive/10",
-    title: "text-destructive",
+    text: "text-destructive",
     icon: <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />,
   },
 }
 
-function ComplianceBanner({
-  level,
-  title,
-  detail,
-}: {
-  level: RiskLevel
-  title: string
-  detail: string
-}) {
-  const style = complianceStyles[level]
-
+/** Client-side policy verdict — see `categoryLimits` in `lib/policy.ts`. */
+function PolicyNote({ level, label }: { level: RiskLevel; label: string }) {
+  const style = policyStyles[level]
   return (
-    <div role="status" className={cn("flex items-start gap-2.5 rounded-lg border p-3", style.wrap)}>
+    <div className={cn("flex items-start gap-2.5 rounded-lg border p-3", style.wrap)}>
       {style.icon}
       <div className="min-w-0">
-        <p className={cn("text-xs font-semibold", style.title)}>{title}</p>
-        {detail && (
-          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{detail}</p>
-        )}
+        <p className={cn("text-xs font-semibold", style.text)}>{label}</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+          사내 지출 한도 기준으로 자동 판정한 결과입니다. 최종 판단은 결재자가 합니다.
+        </p>
       </div>
-      <span className="ml-auto hidden shrink-0 items-center gap-1 self-center rounded-full bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
-        <Sparkles className="size-2.5" />
-        AI 규정 검토
-      </span>
     </div>
   )
 }
