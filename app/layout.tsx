@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: '바로 — AI 영수증 결재 & SaaS 지출 관리',
+  title: '정산바로',
   description:
     'AI가 영수증 결재와 SaaS 구독 지출을 대신 정리해 주는 재무 자동화 서비스.',
   generator: 'v0.app',

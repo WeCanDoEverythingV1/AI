@@ -1,10 +1,23 @@
 import type { ApiErrorBody } from "@/types/api"
 
+/** The deployed backend, used when no environment override is supplied. */
+const DEFAULT_API_BASE_URL = "https://baro-2fl1.onrender.com"
+
 /**
- * Base URL of the Baro backend, e.g. `https://baro-2fl1.onrender.com`.
- * An empty value falls back to same-origin, which is only useful behind a proxy.
+ * Base URL of the Baro backend.
+ *
+ * `NEXT_PUBLIC_API_URL` wins whenever it is set — point it at a local backend
+ * during development. It is inlined at **build** time, so a host that is missing
+ * the variable bakes in an empty string; that used to turn every call into a
+ * same-origin request, and since this app serves no API routes of its own, the
+ * result was a wall of 404s that looks nothing like a configuration problem.
+ * Defaulting to the deployed service makes a forgotten variable harmless.
+ *
+ * `||` rather than `??` on purpose: an empty string must fall back too.
  */
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, "")
+export const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE_URL
+).replace(/\/+$/, "")
 
 export const apiUrl = (path: string) => `${API_BASE_URL}${path}`
 
