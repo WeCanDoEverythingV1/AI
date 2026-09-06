@@ -14,7 +14,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Field } from "@/components/field"
 import {
@@ -36,13 +35,10 @@ import {
   rejectRequest,
 } from "@/lib/api/endpoints"
 import { parseServerTimestamp } from "@/lib/api/client"
-import {
-  categoryLabels,
-  deriveRisk,
-  expenseCategories,
-  statusLabels,
-  type RiskLevel,
-} from "@/lib/policy"
+import { ComplianceBadge, resolveVerdict } from "@/components/compliance"
+import { ApprovalStatusBadge } from "@/components/status-badge"
+import { useHiddenRequests } from "@/hooks/use-hidden-requests"
+import { categoryLabels, expenseCategories } from "@/lib/policy"
 import type {
   ApprovalRequestCreateDto,
   ApprovalRequestResponseDto,
@@ -59,9 +55,9 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Store,
   Tag,
+  Trash2,
   TriangleAlert,
   User,
   Wallet2,
@@ -110,6 +106,9 @@ export function ApproverDashboard() {
   const [deciding, setDeciding] = useState<Record<number, boolean>>({})
   const [actionError, setActionError] = useState<string | null>(null)
 
+  /** Rows this approver cleared from their own view; no server delete exists. */
+  const hidden = useHiddenRequests("approver")
+
   const loadRef = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
@@ -141,8 +140,9 @@ export function ApproverDashboard() {
   }, [load])
 
   const buckets = useMemo(() => {
-    // Newest first within each bucket.
-    const sorted = [...requests].sort(
+    // Newest first within each bucket. Hidden rows leave the counts too, so the
+    // stat cards never disagree with the list under them.
+    const sorted = [...requests].filter((r) => !hidden.hidden.has(r.id)).sort(
       (a, b) =>
         parseServerTimestamp(b.createdAt).getTime() -
         parseServerTimestamp(a.createdAt).getTime(),
@@ -152,7 +152,7 @@ export function ApproverDashboard() {
       APPROVED: sorted.filter((r) => r.status === "APPROVED"),
       REJECTED: sorted.filter((r) => r.status === "REJECTED"),
     }
-  }, [requests])
+  }, [requests, hidden.hidden])
 
   const visible = buckets[view]
   const meta = viewMeta[view]
@@ -277,6 +277,7 @@ export function ApproverDashboard() {
                   req={req}
                   busy={Boolean(deciding[req.id])}
                   onDecide={decide}
+                  onHide={hidden.hide}
                 />
               ))}
             </TableBody>
@@ -499,10 +500,9 @@ function AddRequestDialog({
             />
           </Field>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">정책 검토 미리보기</Label>
-            <RiskPreview amount={draft.amount} category={draft.expenseCategory} />
-          </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            등록하면 서버가 사내 규정 기준으로 판정하고, 결과가 목록에 표시됩니다.
+          </p>
 
           {error && <p className="text-xs text-destructive">{error}</p>}
         </form>
@@ -521,17 +521,6 @@ function AddRequestDialog({
   )
 }
 
-/** Shows the approver what policy verdict this amount will land on before saving. */
-function RiskPreview({ amount, category }: { amount: string; category: ExpenseCategory }) {
-  const parsed = Number.parseFloat(amount.replace(/[^0-9.]/g, ""))
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return <p className="text-xs text-muted-foreground">금액을 입력하면 판정이 표시됩니다.</p>
-  }
-
-  const risk = deriveRisk(parsed, category)
-  return <RiskBadge level={risk.level} label={risk.label} />
-}
-
 /* ------------------------------------------------------------------ *
  * Table row
  * ------------------------------------------------------------------ */
@@ -540,13 +529,13 @@ function Row({
   req,
   busy,
   onDecide,
+  onHide,
 }: {
   req: ApprovalRequestResponseDto
   busy: boolean
   onDecide: (id: number, next: Exclude<ApprovalStatus, "PENDING">) => void
+  onHide: (id: number) => void
 }) {
-  const risk = deriveRisk(req.amount, req.expenseCategory)
-
   return (
     <TableRow>
       <TableCell className="pl-5">
@@ -579,7 +568,7 @@ function Row({
         </p>
       </TableCell>
       <TableCell>
-        <RiskBadge level={risk.level} label={risk.label} />
+        <ComplianceBadge verdict={resolveVerdict(req)} />
       </TableCell>
       <TableCell className="hidden whitespace-nowrap text-sm text-muted-foreground sm:table-cell">
         {formatApiDate(req.date)}
@@ -615,11 +604,24 @@ function Row({
             </Button>
           </div>
         ) : (
-          <div className="text-right">
-            <StatusBadge status={req.status} />
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {formatCreatedAt(req.createdAt)} 접수
-            </p>
+          <div className="flex items-center justify-end gap-1">
+            <div className="text-right">
+              <ApprovalStatusBadge status={req.status} />
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {formatCreatedAt(req.createdAt)} 접수
+              </p>
+            </div>
+            {/* Hides the row for this approver only — there is no server delete. */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onHide(req.id)}
+              aria-label={`REQ-${req.id} 목록에서 숨기기`}
+              title="이 목록에서 숨기기 (서버에서 삭제되지는 않습니다)"
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
           </div>
         )}
       </TableCell>
@@ -641,59 +643,6 @@ function formatCreatedAt(value: string) {
 /* ------------------------------------------------------------------ *
  * Badges
  * ------------------------------------------------------------------ */
-
-const badgeBase =
-  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium"
-
-const riskStyles: Record<RiskLevel, { wrap: string; icon: React.ReactNode }> = {
-  compliant: {
-    wrap: "border-success/30 bg-success/10 text-success",
-    icon: <ShieldCheck className="size-3.5" />,
-  },
-  warning: {
-    wrap: "border-warning/45 bg-warning/15 text-warning-foreground",
-    icon: <TriangleAlert className="size-3.5" />,
-  },
-  high: {
-    wrap: "border-destructive/30 bg-destructive/10 text-destructive",
-    icon: <TriangleAlert className="size-3.5" />,
-  },
-}
-
-function RiskBadge({ level, label }: { level: RiskLevel; label: string }) {
-  const style = riskStyles[level]
-  return (
-    <span className={cn(badgeBase, style.wrap)}>
-      {style.icon}
-      {label}
-    </span>
-  )
-}
-
-const statusStyles: Record<ApprovalStatus, { wrap: string; icon: React.ReactNode }> = {
-  PENDING: {
-    wrap: "border-border bg-muted text-muted-foreground",
-    icon: <Clock className="size-3.5" />,
-  },
-  APPROVED: {
-    wrap: "border-success/30 bg-success/10 text-success",
-    icon: <Check className="size-3.5" />,
-  },
-  REJECTED: {
-    wrap: "border-destructive/30 bg-destructive/10 text-destructive",
-    icon: <X className="size-3.5" />,
-  },
-}
-
-function StatusBadge({ status }: { status: ApprovalStatus }) {
-  const style = statusStyles[status]
-  return (
-    <span className={cn(badgeBase, style.wrap)}>
-      {style.icon}
-      {statusLabels[status]}
-    </span>
-  )
-}
 
 /* ------------------------------------------------------------------ *
  * Stat cards — also the filter control for the list below

@@ -62,45 +62,15 @@ export function toExpenseCategory(raw: string | undefined | null): ExpenseCatego
   return aliases[lower] ?? "OTHER"
 }
 
-/* ------------------------------------------------------------------ *
- * Client-side policy check
- * ------------------------------------------------------------------ */
-
-export type RiskLevel = "compliant" | "warning" | "high"
-
-export type RiskAnalysis = {
-  level: RiskLevel
-  label: string
-}
-
-/**
- * Per-category spend caps, in KRW.
+/*
+ * There is deliberately no client-side spend limit here any more.
  *
- * The backend returns no risk field on an approval request — only the receipt
- * scan flags duplicates. So the approver's risk column is derived here from the
- * two facts the API does give us (category + amount). Change these numbers to
- * match the real expense policy; nothing else depends on them.
+ * Judging an expense is the server's job: it evaluates against the ruleset
+ * extracted from the company's own 복무규정 and returns `complianceLevel` /
+ * `complianceSummary` / `citedClauses` on the record. Recomputing it here with
+ * hardcoded caps would contradict the active policy and could not cite a clause.
+ * Render the server's verdict with `components/compliance.tsx`.
  */
-export const categoryLimits: Record<ExpenseCategory, number> = {
-  MEALS: 75_000,
-  TRAVEL: 1_000_000,
-  LODGING: 300_000,
-  SOFTWARE: 200_000,
-  OFFICE_SUPPLIES: 200_000,
-  OTHER: 300_000,
-}
-
-/** Flag at 80% of the cap so an approver sees a request creeping toward the limit. */
-const WARN_RATIO = 0.8
-
-export function deriveRisk(amount: number, category: ExpenseCategory): RiskAnalysis {
-  const limit = categoryLimits[category]
-  const label = categoryLabels[category]
-
-  if (amount > limit) return { level: "high", label: `위험: ${label} 한도 초과` }
-  if (amount >= limit * WARN_RATIO) return { level: "warning", label: "주의: 한도 임박" }
-  return { level: "compliant", label: "규정 준수" }
-}
 
 /* ------------------------------------------------------------------ *
  * Subscription analysis

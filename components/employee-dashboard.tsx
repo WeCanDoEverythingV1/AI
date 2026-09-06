@@ -15,13 +15,17 @@ import {
   scanReceipt,
   validateReceiptFile,
 } from "@/lib/api/endpoints"
+import { CompliancePanel, resolveVerdict } from "@/components/compliance"
+import { DecisionNotices } from "@/components/decision-notices"
+import { MyRequests } from "@/components/my-requests"
+import { usePolicyEvaluation } from "@/hooks/use-policy-evaluation"
+import { useDecisionNotices } from "@/hooks/use-decision-notices"
+import { useHiddenRequests } from "@/hooks/use-hidden-requests"
 import {
   categoryLabels,
-  deriveRisk,
   expenseCategories,
   statusLabels,
   toExpenseCategory,
-  type RiskLevel,
 } from "@/lib/policy"
 import type {
   ApprovalRequestCreateDto,
@@ -31,13 +35,13 @@ import type {
 } from "@/types/api"
 import {
   Calendar,
+  Check,
   CheckCircle2,
   Copy,
   FileText,
   Layers,
   Loader2,
   RotateCcw,
-  ShieldCheck,
   Sparkles,
   Store,
   Tag,
@@ -232,11 +236,45 @@ export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
   }
 
   const busy = stage === "scanning"
-  const parsedAmount = Number(form.amount)
-  const risk =
-    Number.isFinite(parsedAmount) && parsedAmount > 0
-      ? deriveRisk(parsedAmount, form.expenseCategory)
-      : null
+
+  /** Polls for approve/reject on this employee's own requests. */
+  const decisions = useDecisionNotices(employeeName)
+  /** Rows cleared from this employee's own list; no server delete exists. */
+  const hidden = useHiddenRequests(`employee:${employeeName}`)
+  const myRequests = decisions.requests.filter((r) => !hidden.hidden.has(r.id))
+
+  // The scan carries both signals under different names than an approval record.
+  const scanVerdict = scan
+    ? resolveVerdict({
+        complianceLevel: scan.policyCheck?.level,
+        complianceSummary: scan.policyCheck?.summary,
+        citedClauses: scan.policyCheck?.citedClauses,
+        rulesetVersion: scan.policyCheck?.rulesetVersion,
+        risk: scan.risk,
+      })
+    : null
+
+  /**
+   * Corrected numbers change the answer, so ask the server again as they are
+   * typed. Only a complete, sane form is worth a round trip.
+   */
+  const editedAmount = Number(form.amount)
+  const live = usePolicyEvaluation(
+    stage === "ready" && Number.isFinite(editedAmount) && editedAmount > 0 && form.date
+      ? {
+          category: form.expenseCategory,
+          amount: editedAmount,
+          date: form.date,
+          merchant: form.merchant.trim() || undefined,
+          itemName: form.itemName.trim() || undefined,
+          purpose: form.purpose.trim() || undefined,
+        }
+      : null,
+  )
+
+  // The live verdict reflects what is on screen; the scan's reflects what the AI
+  // first read. Prefer live, and fall back until the first response lands.
+  const verdict = live.verdict ?? scanVerdict
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -419,6 +457,13 @@ export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
                 <p className="mt-2 font-mono text-xs text-muted-foreground">
                   REQ-{submitted.id} · {statusLabels[submitted.status]}
                 </p>
+
+                {/* The verdict the server stamped on the record — the one the approver sees. */}
+                {resolveVerdict(submitted).source !== "none" && (
+                  <div className="mt-5 w-full text-left">
+                    <CompliancePanel verdict={resolveVerdict(submitted)} />
+                  </div>
+                )}
                 <Button variant="outline" size="sm" className="mt-5" onClick={reset}>
                   다른 영수증 제출하기
                 </Button>
@@ -525,7 +570,38 @@ export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
                   />
                 </Field>
 
-                {risk && <PolicyNote level={risk.level} label={risk.label} />}
+                {verdict && verdict.source !== "none" && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      {live.loading ? (
+                        <>
+                          <Loader2 className="size-3 animate-spin" />
+                          입력한 금액으로 다시 판정하는 중…
+                        </>
+                      ) : live.verdict ? (
+                        <>
+                          <Check className="size-3 text-success" />
+                          현재 입력값 기준 판정입니다.
+                        </>
+                      ) : null}
+                    </div>
+
+                    <CompliancePanel
+                      verdict={verdict}
+                      footnote={
+                        live.unavailable
+                          ? "활성화된 사내 규정이 없어 실시간 판정을 할 수 없습니다. 규정 관리에서 규정집을 등록해 주세요."
+                          : undefined
+                      }
+                    />
+
+                    {live.error && (
+                      <p className="text-[11px] text-muted-foreground">
+                        {live.error} 최종 판정은 제출 시 서버가 다시 계산합니다.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-4 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <label
@@ -556,6 +632,21 @@ export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
           </form>
         </section>
       </div>
+
+      <MyRequests
+        requests={myRequests}
+        loading={decisions.loading}
+        error={decisions.error}
+        freshIds={new Set(decisions.notices.map((n) => n.id))}
+        onRefresh={() => void decisions.refresh()}
+        onHide={(id) => {
+          hidden.hide(id)
+          // Hiding the row acknowledges the decision, so drop its toast too.
+          decisions.dismiss(id)
+        }}
+      />
+
+      <DecisionNotices notices={decisions.notices} onDismiss={decisions.dismiss} />
     </main>
   )
 }
@@ -582,36 +673,3 @@ function DuplicateBanner({ note }: { note: string }) {
   )
 }
 
-const policyStyles: Record<RiskLevel, { wrap: string; text: string; icon: React.ReactNode }> = {
-  compliant: {
-    wrap: "border-success/25 bg-success/8",
-    text: "text-success",
-    icon: <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" />,
-  },
-  warning: {
-    wrap: "border-warning/40 bg-warning/12",
-    text: "text-warning-foreground",
-    icon: <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />,
-  },
-  high: {
-    wrap: "border-destructive/30 bg-destructive/10",
-    text: "text-destructive",
-    icon: <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />,
-  },
-}
-
-/** Client-side policy verdict — see `categoryLimits` in `lib/policy.ts`. */
-function PolicyNote({ level, label }: { level: RiskLevel; label: string }) {
-  const style = policyStyles[level]
-  return (
-    <div className={cn("flex items-start gap-2.5 rounded-lg border p-3", style.wrap)}>
-      {style.icon}
-      <div className="min-w-0">
-        <p className={cn("text-xs font-semibold", style.text)}>{label}</p>
-        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-          사내 지출 한도 기준으로 자동 판정한 결과입니다. 최종 판단은 결재자가 합니다.
-        </p>
-      </div>
-    </div>
-  )
-}
