@@ -1,7 +1,7 @@
 "use client"
 
 import type { Role } from "@/lib/mock-data"
-import { ArrowRight, ReceiptText, ShieldCheck, Sparkles, UserRound } from "lucide-react"
+import { ArrowRight, FileDown, ReceiptText, ShieldCheck, Sparkles, UserRound } from "lucide-react"
 
 export function UserSelection({ onSelect }: { onSelect: (role: Role) => void }) {
   return (
@@ -43,6 +43,24 @@ export function UserSelection({ onSelect }: { onSelect: (role: Role) => void }) 
             onClick={() => onSelect("approver")}
           />
         </div>
+      <a
+        href="/예시규정집.pdf"
+          download
+          className="mt-6 flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-card-foreground shadow-sm transition-colors hover:border-primary/40"
+>
+  <FileDown className="size-4 text-primary" />
+  회사 규정집 예시 파일 다운로드하기
+  <span className="text-xs font-normal text-muted-foreground">PDF</span>
+</a>
+<a
+        href="/예시영수증.png"
+          download
+          className="mt-6 flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-card-foreground shadow-sm transition-colors hover:border-primary/40"
+>
+  <FileDown className="size-4 text-primary" />
+  영수증 예시 파일 다운로드하기
+  <span className="text-xs font-normal text-muted-foreground">PDF</span>
+</a>
 
         <p className="mt-8 text-center text-xs text-muted-foreground">
           데모 환경 · 로그인 정보가 필요 없습니다
