@@ -127,7 +127,10 @@ export function EmployeeDashboard({ employeeName }: { employeeName: string }) {
     setConfirmed(false)
 
     try {
-      const result = await scanReceipt(nextFile, { signal: controller.signal })
+      const result = await scanReceipt(nextFile, {
+        employeeName,
+        signal: controller.signal,
+      })
       if (controller.signal.aborted) return
 
       setScan(result)

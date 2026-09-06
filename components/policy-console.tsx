@@ -43,6 +43,7 @@ import {
   FlaskConical,
   Layers,
   Loader2,
+  RotateCcw,
   Quote,
   Save,
   ShieldCheck,
@@ -69,6 +70,8 @@ export function PolicyConsole() {
   /** The version awaiting delete confirmation. */
   const [pendingDelete, setPendingDelete] = useState<PolicyRuleset | null>(null)
   const [deleting, setDeleting] = useState(false)
+  /** The PDF behind the current draft, so it can be re-extracted. */
+  const [lastFile, setLastFile] = useState<File | null>(null)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<AbortController | null>(null)
@@ -103,6 +106,41 @@ export function PolicyConsole() {
     }
   }, [load])
 
+  const runUpload = async (file: File, force: boolean) => {
+    uploadRef.current?.abort()
+    const controller = new AbortController()
+    uploadRef.current = controller
+
+    setUploading(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const extracted = await uploadPolicyDocument(file, {
+        force,
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
+      setDraft(extracted)
+      // The upload replaces any earlier draft; the active ruleset stays until
+      // this one is activated.
+      setVersions((prev) => [
+        extracted,
+        ...prev.filter((v) => v.status !== "DRAFT" && v.id !== extracted.id),
+      ])
+      setNotice(
+        `${extracted.rules.length}개 조항을 ${force ? "다시 " : ""}추출했습니다. 활성화 전에 내용을 확인해 주세요.`,
+      )
+    } catch (caught) {
+      if (controller.signal.aborted || isAbort(caught)) return
+      setError(messageFor(caught, "규정집을 분석하지 못했습니다."))
+    } finally {
+      if (uploadRef.current === controller) uploadRef.current = null
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ""
+    }
+  }
+
   const handleFiles = async (files: FileList | null) => {
     const picked = files?.[0]
     if (!picked) return
@@ -113,32 +151,9 @@ export function PolicyConsole() {
       return
     }
 
-    uploadRef.current?.abort()
-    const controller = new AbortController()
-    uploadRef.current = controller
-
-    setUploading(true)
-    setError(null)
-    setNotice(null)
-
-    try {
-      const extracted = await uploadPolicyDocument(picked, { signal: controller.signal })
-      if (controller.signal.aborted) return
-      setDraft(extracted)
-      // The upload replaces any earlier draft; the active ruleset stays until
-      // this one is activated.
-      setVersions((prev) => [extracted, ...prev.filter((v) => v.status !== "DRAFT")])
-      setNotice(
-        `${extracted.rules.length}개 조항을 추출했습니다. 활성화 전에 내용을 확인해 주세요.`,
-      )
-    } catch (caught) {
-      if (controller.signal.aborted || isAbort(caught)) return
-      setError(messageFor(caught, "규정집을 분석하지 못했습니다."))
-    } finally {
-      if (uploadRef.current === controller) uploadRef.current = null
-      setUploading(false)
-      if (inputRef.current) inputRef.current.value = ""
-    }
+    // Kept so "다시 추출" can re-send the same bytes past the server's hash cache.
+    setLastFile(picked)
+    await runUpload(picked, false)
   }
 
   const updateDraftRules = (rules: PolicyRule[]) =>
@@ -210,11 +225,7 @@ export function PolicyConsole() {
       setDraft((current) => (current?.id === target.id ? null : current))
       setActive((current) => (current?.id === target.id ? null : current))
       setPendingDelete(null)
-      setNotice(
-        target.status === "ACTIVE"
-          ? `규정 v${target.version}을 삭제했습니다. 적용 중인 규정이 없으니 다른 버전을 활성화해 주세요.`
-          : `규정 v${target.version}을 삭제했습니다.`,
-      )
+      setNotice(`규정 v${target.version}을 삭제했습니다.`)
     } catch (caught) {
       setError(messageFor(caught, "규정을 삭제하지 못했습니다."))
     } finally {
@@ -322,7 +333,7 @@ export function PolicyConsole() {
                   <UploadCloud className="size-6 text-primary" />
                 </div>
                 <p className="mt-4 text-sm font-medium text-foreground">
-                  복무규정 PDF를 끌어다 놓으세요
+                  사내 규정 PDF를 끌어다 놓으세요
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   또는 클릭해서 선택 · PDF만 · 최대 10MB
@@ -389,6 +400,22 @@ export function PolicyConsole() {
                   <p className="mr-auto text-xs text-muted-foreground">
                     활성화하면 기존 규정 v{active.version}은 삭제됩니다.
                   </p>
+                )}
+                {lastFile && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => void runUpload(lastFile, true)}
+                    disabled={saving || uploading}
+                    title="추출 결과가 잘못됐을 때 같은 PDF를 다시 분석합니다"
+                    className="gap-1.5 text-muted-foreground"
+                  >
+                    {uploading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="size-4" />
+                    )}
+                    다시 추출
+                  </Button>
                 )}
                 <Button
                   variant="outline"
@@ -506,13 +533,19 @@ function VersionList({
               </p>
             </div>
             <StatusPill status={v.status} />
+            {/* The server refuses to delete the ACTIVE version, so don't offer it. */}
             <Button
               type="button"
               variant="ghost"
               size="sm"
+              disabled={v.status === "ACTIVE"}
               onClick={() => onDelete(v)}
               aria-label={`규정 v${v.version} 삭제`}
-              title="삭제"
+              title={
+                v.status === "ACTIVE"
+                  ? "적용 중인 규정은 삭제할 수 없습니다. 다른 버전을 먼저 활성화하세요."
+                  : "삭제"
+              }
               className="shrink-0 text-muted-foreground hover:text-destructive"
             >
               <Trash2 className="size-3.5" />
@@ -536,8 +569,6 @@ function DeleteVersionDialog({
   onCancel: () => void
   onConfirm: () => void
 }) {
-  const isActive = target?.status === "ACTIVE"
-
   return (
     <Dialog
       open={target !== null}
@@ -553,17 +584,6 @@ function DeleteVersionDialog({
             삭제됩니다. 되돌릴 수 없습니다.
           </DialogDescription>
         </DialogHeader>
-
-        {isActive && (
-          <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <p className="text-xs leading-relaxed text-destructive">
-              <span className="font-semibold">현재 적용 중인 규정입니다.</span> 삭제하면
-              지출 판정 기준이 사라져, 다른 버전을 활성화할 때까지 판정이 동작하지
-              않습니다.
-            </p>
-          </div>
-        )}
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline" disabled={busy} />}>

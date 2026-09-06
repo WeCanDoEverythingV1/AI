@@ -7,6 +7,10 @@
  * `lib/policy.ts` so the wire shape stays untouched.
  */
 
+// Type-only import; `types/policy.ts` imports ExpenseCategory back from here,
+// which is fine because both sides are erased at compile time.
+import type { CitedClause, ComplianceLevel, PolicyEvaluationResult } from "@/types/policy"
+
 export type ExpenseCategory =
   | "MEALS"
   | "TRAVEL"
@@ -17,7 +21,22 @@ export type ExpenseCategory =
 
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED"
 
-/** `POST /api/receipts/scan` — OCR + AI extraction of an uploaded receipt. */
+/**
+ * Server-side risk verdict.
+ *
+ * Note the vocabulary differs from `ComplianceLevel` in `types/policy.ts`, which
+ * uses `VIOLATION` where this uses `HIGH`. They are separate fields on the same
+ * records, so don't assume one can be cast to the other.
+ */
+export interface RiskAnalysisDto {
+  level: "COMPLIANT" | "WARNING" | "HIGH"
+  label: string
+}
+
+/**
+ * `POST /api/receipts/scan` — OCR + AI extraction of an uploaded receipt.
+ * Takes `employeeName` as a required query parameter.
+ */
 export interface ReceiptScanResultDto {
   merchant: string
   /** `YYYY-MM-DD`. */
@@ -29,6 +48,9 @@ export interface ReceiptScanResultDto {
   category: string
   possibleDuplicate: boolean
   duplicateNote: string
+  risk?: RiskAnalysisDto | null
+  /** Verdict against the active policy ruleset. Absent when no ruleset is active. */
+  policyCheck?: PolicyEvaluationResult | null
 }
 
 /** Body of `POST /api/approval-requests`. Every field is required by the server. */
@@ -61,6 +83,14 @@ export interface ApprovalRequestResponseDto {
    */
   createdAt: string
   expenseCategory: ExpenseCategory
+
+  /* The policy verdict, stamped at creation. See `types/policy.ts`. */
+  risk?: RiskAnalysisDto | null
+  complianceLevel?: ComplianceLevel | null
+  complianceSummary?: string | null
+  citedClauses?: CitedClause[] | null
+  /** Which ruleset version decided it — the audit trail for a past decision. */
+  rulesetVersion?: number | null
 }
 
 /**

@@ -41,15 +41,22 @@ export function validateReceiptFile(file: File): string | null {
   return null
 }
 
-/** `POST /api/receipts/scan` — multipart with a single `file` part. */
+/**
+ * `POST /api/receipts/scan` — multipart with a single `file` part.
+ *
+ * `employeeName` is a **required query parameter**, not a form field: the server
+ * needs to know who is claiming before it can run the duplicate and policy checks.
+ */
 export function scanReceipt(
   file: File,
-  { signal }: Options = {},
+  { employeeName, signal }: Options & { employeeName: string },
 ): Promise<ReceiptScanResultDto> {
   const formData = new FormData()
   formData.append("file", file, file.name)
 
-  return apiFetch<ReceiptScanResultDto>("/api/receipts/scan", {
+  const query = new URLSearchParams({ employeeName })
+
+  return apiFetch<ReceiptScanResultDto>(`/api/receipts/scan?${query}`, {
     method: "POST",
     formData,
     timeoutMs: TIMEOUT.scan,

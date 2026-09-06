@@ -9,7 +9,7 @@ import { currency } from "@/lib/mock-data"
 import { categoryLabels, expenseCategories } from "@/lib/policy"
 import type { ExpenseCategory } from "@/types/api"
 import type { PolicyRule, RuleScope, RuleSeverity } from "@/types/policy"
-import { Quote, Trash2, TriangleAlert } from "lucide-react"
+import { Sparkles, Trash2, TriangleAlert } from "lucide-react"
 
 /**
  * Threshold for raising the "확인 필요" flag. Used internally only — the score
@@ -77,9 +77,14 @@ export function PolicyRuleEditor({
                   {rule.clauseArticle}
                 </Badge>
               )}
-              <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                {/* The server often omits `note`; the clause itself is the fallback. */}
-                {rule.note || rule.clauseText}
+              {/*
+                Title is the verbatim clause, never `note`: the server copies the
+                clause in the document's own language but writes `note` in
+                English, so leading with `note` puts English on a Korean screen.
+                The note still shows below, marked as AI commentary.
+              */}
+              <p className="min-w-0 flex-1 text-sm font-medium text-foreground">
+                {rule.clauseText}
               </p>
               {uncertain && <ReviewFlag />}
               {!readOnly && (
@@ -187,7 +192,7 @@ export function PolicyRuleEditor({
                     key={p}
                     className="border-destructive/30 bg-destructive/10 font-normal text-destructive"
                   >
-                    금지 {p}
+                     {p} 금지
                   </Badge>
                 ))}
                 {rule.conditions?.latestHour != null && (
@@ -203,12 +208,16 @@ export function PolicyRuleEditor({
               </div>
             )}
 
+            {/* AI commentary — carries the currency conversion the server applied. */}
+            {rule.note && (
+              <p className="mt-3 flex gap-1.5 text-xs leading-relaxed text-muted-foreground">
+                <Sparkles className="mt-0.5 size-3 shrink-0 text-primary" />
+                {rule.note}
+              </p>
+            )}
+
             <figure className="mt-3 border-l-2 border-border pl-3">
-              <blockquote className="flex gap-1.5 text-xs leading-relaxed text-muted-foreground">
-                <Quote className="mt-0.5 size-3 shrink-0" />
-                {rule.clauseText}
-              </blockquote>
-              <figcaption className="mt-1 text-[11px] text-muted-foreground/70">
+              <figcaption className="text-[11px] text-muted-foreground/70">
                 {rule.clauseArticle ?? "출처 미상"}
                 {rule.clausePage ? ` · ${rule.clausePage}쪽` : ""}
                 {rule.limitAmount != null && ` · 현재 한도 ${currency(rule.limitAmount)}`}

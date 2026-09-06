@@ -30,15 +30,19 @@ export function validatePolicyFile(file: File): string | null {
 /**
  * `POST /api/policies` — upload the 복무규정 PDF and get back a **draft** ruleset.
  * Nothing takes effect until a reviewer activates it.
+ *
+ * The server caches extraction by file hash, so re-uploading the same PDF returns
+ * the stored ruleset instead of re-running the model. Pass `force` to skip that
+ * cache when the stored result looks wrong.
  */
 export function uploadPolicyDocument(
   file: File,
-  { signal }: Options = {},
+  { force = false, signal }: Options & { force?: boolean } = {},
 ): Promise<PolicyRuleset> {
   const formData = new FormData()
   formData.append("file", file, file.name)
 
-  return apiFetch<PolicyRuleset>("/api/policies", {
+  return apiFetch<PolicyRuleset>(`/api/policies${force ? "?force=true" : ""}`, {
     method: "POST",
     formData,
     // Parsing a long PDF and extracting rules is the slowest call in the app.
