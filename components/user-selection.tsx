@@ -59,7 +59,7 @@ export function UserSelection({ onSelect }: { onSelect: (role: Role) => void }) 
 >
   <FileDown className="size-4 text-primary" />
   영수증 예시 파일 다운로드하기
-  <span className="text-xs font-normal text-muted-foreground">PDF</span>
+  <span className="text-xs font-normal text-muted-foreground">PNG</span>
 </a>
 
         <p className="mt-8 text-center text-xs text-muted-foreground">
